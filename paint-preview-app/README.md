@@ -5,6 +5,7 @@ A no-dependency MVP that implements the first app-focused milestone:
 - Room image upload
 - Shade suggestions from dominant image color
 - Instant color overlay preview
+- Natural recolor mode (HSL-based) for better texture and lighting preservation
 - Before/after toggle
 - Compare mode
 - Export and native share (when supported)
@@ -28,5 +29,6 @@ Open `index.html` directly in browser for quick testing.
 
 ## Notes
 
-- The wall mask is heuristic-based (saturation + brightness threshold) for MVP speed.
-- Next step is replacing heuristic masking with user brush/mask or segmentation model.
+- Smart wall mask uses software-only region growing seeded in likely wall zones.
+- Natural recolor mode shifts hue/saturation while largely preserving source luminance.
+- Next step is adding optional manual brush mask + AI segmentation fallback.

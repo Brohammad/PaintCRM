@@ -3,6 +3,7 @@ const exportBtn = document.getElementById("exportBtn");
 const beforeAfterToggle = document.getElementById("beforeAfterToggle");
 const compareToggle = document.getElementById("compareToggle");
 const smartMaskToggle = document.getElementById("smartMaskToggle");
+const naturalColorToggle = document.getElementById("naturalColorToggle");
 const opacitySlider = document.getElementById("opacitySlider");
 const sensitivitySlider = document.getElementById("sensitivitySlider");
 
@@ -64,6 +65,71 @@ function clamp(value, min, max) {
 
 function getPerceivedBrightness(r, g, b) {
   return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+function rgbToHsl(r, g, b) {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const delta = max - min;
+  let h = 0;
+  const l = (max + min) / 2;
+  let s = 0;
+
+  if (delta !== 0) {
+    s = delta / (1 - Math.abs(2 * l - 1));
+    switch (max) {
+      case rn:
+        h = ((gn - bn) / delta) % 6;
+        break;
+      case gn:
+        h = (bn - rn) / delta + 2;
+        break;
+      default:
+        h = (rn - gn) / delta + 4;
+    }
+    h = (h * 60 + 360) % 360;
+  }
+
+  return { h, s, l };
+}
+
+function hslToRgb(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r1 = 0;
+  let g1 = 0;
+  let b1 = 0;
+
+  if (hp >= 0 && hp < 1) {
+    r1 = c;
+    g1 = x;
+  } else if (hp < 2) {
+    r1 = x;
+    g1 = c;
+  } else if (hp < 3) {
+    g1 = c;
+    b1 = x;
+  } else if (hp < 4) {
+    g1 = x;
+    b1 = c;
+  } else if (hp < 5) {
+    r1 = x;
+    b1 = c;
+  } else {
+    r1 = c;
+    b1 = x;
+  }
+
+  const m = l - c / 2;
+  return {
+    r: Math.round((r1 + m) * 255),
+    g: Math.round((g1 + m) * 255),
+    b: Math.round((b1 + m) * 255)
+  };
 }
 
 function drawImageFit(ctx, image, canvas) {
@@ -205,6 +271,39 @@ function tintPixels(pixels, shadeRgb, opacity, sensitivity, wallMask) {
   return new ImageData(data, pixels.width, pixels.height);
 }
 
+function tintPixelsNatural(pixels, shadeRgb, opacity, sensitivity, wallMask) {
+  const data = new Uint8ClampedArray(pixels.data);
+  const blend = opacity / 100;
+  const target = rgbToHsl(shadeRgb.r, shadeRgb.g, shadeRgb.b);
+
+  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+
+    if (wallMask) {
+      if (!wallMask[p]) continue;
+    } else if (!isLikelyWallPixel(r, g, b, sensitivity)) {
+      continue;
+    }
+
+    const source = rgbToHsl(r, g, b);
+
+    // Preserve image luminance and detail while shifting color toward target shade.
+    const mapped = hslToRgb(
+      target.h,
+      clamp(source.s * 0.35 + target.s * 0.65, 0, 1),
+      clamp(source.l * 0.9 + target.l * 0.1, 0, 1)
+    );
+
+    data[i] = Math.round(r * (1 - blend) + mapped.r * blend);
+    data[i + 1] = Math.round(g * (1 - blend) + mapped.g * blend);
+    data[i + 2] = Math.round(b * (1 - blend) + mapped.b * blend);
+  }
+
+  return new ImageData(data, pixels.width, pixels.height);
+}
+
 function averageColorSample(pixels) {
   let r = 0;
   let g = 0;
@@ -256,6 +355,7 @@ function setControlsEnabled(enabled) {
   beforeAfterToggle.disabled = !enabled;
   compareToggle.disabled = !enabled;
   smartMaskToggle.disabled = !enabled;
+  naturalColorToggle.disabled = !enabled;
   opacitySlider.disabled = !enabled;
   sensitivitySlider.disabled = !enabled;
 }
@@ -303,13 +403,10 @@ function drawPreview() {
     const opacity = Number(opacitySlider.value);
     const sensitivity = Number(sensitivitySlider.value);
     const wallMask = ensureWallMask(pixels, sensitivity);
-    const tinted = tintPixels(
-      pixels,
-      hexToRgb(state.activeShade.hex),
-      opacity,
-      sensitivity,
-      wallMask
-    );
+    const shadeRgb = hexToRgb(state.activeShade.hex);
+    const tinted = naturalColorToggle.checked
+      ? tintPixelsNatural(pixels, shadeRgb, opacity, sensitivity, wallMask)
+      : tintPixels(pixels, shadeRgb, opacity, sensitivity, wallMask);
     previewCtx.putImageData(tinted, fit.dx, fit.dy);
   }
 
@@ -331,13 +428,10 @@ function drawCompareIfEnabled() {
   const opacity = Number(opacitySlider.value);
   const sensitivity = Number(sensitivitySlider.value);
   const wallMask = ensureWallMask(pixels, sensitivity);
-  const tinted = tintPixels(
-    pixels,
-    hexToRgb(state.compareShade.hex),
-    opacity,
-    sensitivity,
-    wallMask
-  );
+  const shadeRgb = hexToRgb(state.compareShade.hex);
+  const tinted = naturalColorToggle.checked
+    ? tintPixelsNatural(pixels, shadeRgb, opacity, sensitivity, wallMask)
+    : tintPixels(pixels, shadeRgb, opacity, sensitivity, wallMask);
   compareCtx.putImageData(tinted, fit.dx, fit.dy);
 }
 
@@ -437,4 +531,5 @@ smartMaskToggle.addEventListener("change", () => {
   state.maskSensitivity = null;
   drawPreview();
 });
+naturalColorToggle.addEventListener("change", drawPreview);
 exportBtn.addEventListener("click", exportPreview);
