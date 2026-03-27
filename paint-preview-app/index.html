@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Paint Preview App</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-card">
+        <div class="hero-copy">
+          <p class="eyebrow">Paint Decision Engine</p>
+          <h1>Upload a room. Test colors. Decide fast.</h1>
+          <p>
+            This V1 is optimized for in-store demos: fast image upload,
+            instant shade preview, compare mode, and one-click share.
+          </p>
+          <div class="actions-row">
+            <label class="button primary" for="imageInput">Upload Room Photo</label>
+            <button id="exportBtn" class="button ghost" disabled>Export Preview</button>
+          </div>
+          <input id="imageInput" type="file" accept="image/*" hidden />
+        </div>
+        <div class="quick-metrics">
+          <div>
+            <span>Decision Speed</span>
+            <strong>&lt; 60s flow</strong>
+          </div>
+          <div>
+            <span>Suggestions</span>
+            <strong>Top 5 shades</strong>
+          </div>
+          <div>
+            <span>Device</span>
+            <strong>Mobile friendly</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="canvas-panel">
+          <header>
+            <h2>Room Preview</h2>
+            <div class="panel-controls">
+              <label class="toggle">
+                <input id="beforeAfterToggle" type="checkbox" disabled />
+                <span>Before/After</span>
+              </label>
+              <label class="toggle">
+                <input id="compareToggle" type="checkbox" disabled />
+                <span>Compare</span>
+              </label>
+            </div>
+          </header>
+
+          <div class="canvas-wrap" id="canvasWrap">
+            <canvas id="previewCanvas" width="1280" height="720"></canvas>
+            <canvas id="compareCanvas" width="1280" height="720" class="hidden"></canvas>
+            <p id="canvasHint">Upload a room image to start previewing shades.</p>
+          </div>
+        </article>
+
+        <aside class="control-panel">
+          <section>
+            <h3>Suggested Shades</h3>
+            <p class="muted">Auto-picked from your image dominant color.</p>
+            <div id="suggestions" class="swatch-grid"></div>
+          </section>
+
+          <section>
+            <h3>Current Shade</h3>
+            <div class="shade-row">
+              <div id="activeSwatch" class="active-swatch"></div>
+              <div>
+                <p id="activeShadeName">No shade selected</p>
+                <p id="activeShadeHex" class="muted">-</p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h3>Preview Controls</h3>
+            <label class="toggle">
+              <input id="smartMaskToggle" type="checkbox" checked disabled />
+              <span>Smart wall mask (software)</span>
+            </label>
+            <label class="slider-label">
+              Overlay strength
+              <input id="opacitySlider" type="range" min="10" max="90" value="45" disabled />
+            </label>
+            <label class="slider-label">
+              Wall sensitivity
+              <input id="sensitivitySlider" type="range" min="5" max="60" value="25" disabled />
+            </label>
+          </section>
+
+          <section>
+            <h3>Compare Shade</h3>
+            <p class="muted">Pick another shade for side-by-side comparison.</p>
+            <div id="compareSuggestions" class="swatch-grid compact"></div>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
