@@ -83,6 +83,16 @@
           </section>
 
           <section>
+            <h3>Wall Tabs</h3>
+            <p class="muted">Assign different shades to multiple wall regions.</p>
+            <div id="zoneTabs" class="zone-tabs"></div>
+            <div class="zone-actions">
+              <button id="addZoneBtn" class="button tiny ghost" disabled>Add Wall Tab</button>
+              <button id="removeZoneBtn" class="button tiny ghost" disabled>Remove Active</button>
+            </div>
+          </section>
+
+          <section>
             <h3>Preview Controls</h3>
             <label class="toggle">
               <input id="smartMaskToggle" type="checkbox" checked disabled />
@@ -92,6 +102,25 @@
               <input id="naturalColorToggle" type="checkbox" checked disabled />
               <span>Natural recolor mode (HSL)</span>
             </label>
+            <div class="mask-actions">
+              <label class="toggle">
+                <input id="pickWallToggle" type="checkbox" disabled />
+                <span>Tap to select wall area</span>
+              </label>
+              <button id="resetWallBtn" class="button tiny ghost" disabled>Reset Wall</button>
+            </div>
+            <div class="mask-actions">
+              <label class="toggle">
+                <input id="brushMaskToggle" type="checkbox" disabled />
+                <span>Brush mask mode</span>
+              </label>
+              <button id="clearBrushBtn" class="button tiny ghost" disabled>Clear Brush</button>
+            </div>
+            <label class="slider-label">
+              Brush size
+              <input id="brushSizeSlider" type="range" min="6" max="80" value="24" disabled />
+            </label>
+            <p id="maskStatus" class="status-chip">Wall mode: auto</p>
             <label class="slider-label">
               Overlay strength
               <input id="opacitySlider" type="range" min="10" max="90" value="45" disabled />

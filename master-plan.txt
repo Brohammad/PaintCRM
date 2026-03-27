@@ -1,0 +1,159 @@
+Paint Intelligence Platform - Master Execution Plan
+Date: 27 March 2026
+
+1) Vision and Core Product Job
+- Vision: Build a paint decision engine first, then expand into a dealer operating system.
+- Core product job (current stage): Help a customer choose a paint color confidently in under 60 seconds.
+- Expansion principle: Only add new modules after measurable proof from the current module.
+
+2) Current Build Status
+Completed in the app:
+- Room photo upload
+- Suggested shades (top 5)
+- Live recolor preview
+- Before/after toggle
+- Compare mode
+- Export preview
+- Smart wall masking (software)
+- Natural recolor mode (HSL)
+- Tap-to-lock wall selection
+- Multi-wall tabs with independent selection and color
+- Brush mask mode with brush size and clear/reset
+- Dark and high-contrast test shades (including black/charcoal)
+
+Validation objective now:
+- Confirm wall-tab behavior is reliable in real test images.
+- Confirm manual brush flow solves missed wall detection cases.
+
+3) Product Scope Guardrails
+Build now:
+- Fast visual decision flow
+- Better masking accuracy
+- Per-wall control
+- Conversion hooks to dealer
+
+Do not build now:
+- Full CRM suite
+- Marketplace complexity
+- VR/true 3D rendering
+- Heavy AI workflows unrelated to immediate decision flow
+
+4) Phase Roadmap
+
+Phase 0 - Product Contract (Done)
+- Lock scope: upload -> suggest -> preview -> compare -> share
+- Define phase success metrics
+
+Phase 1 - Decision Engine Hardening (In progress)
+- Improve wall selection reliability
+- Add manual brush and per-wall editing controls
+- Improve auto wall choosing quality
+- Keep one-screen flow usable on mobile and desktop
+
+Phase 2 - Conversion Layer (Next)
+- Add Contact Dealer action
+- Capture lead details: name, phone, selected shades, preview snapshot
+- Add simple local dealer inbox/list for captured leads
+- Add session save for draft previews
+
+Phase 3 - Pilot Validation (After conversion layer)
+- Test with 3 to 5 local dealers
+- Measure:
+  - Time to customer decision
+  - Share/contact action rate
+  - Dealer feedback on close-rate impact
+- Exit criteria: evidence of repeated real usage
+
+Phase 4 - Backend Foundation
+- Basic auth and tenant model
+- Lead APIs and preview metadata storage
+- Shade and dealer catalog APIs
+- Event tracking for funnel analytics
+
+Phase 5 - CRM Lite
+- Customer CRUD
+- Site/project basics
+- Link preview sessions to customer/site timeline
+
+Phase 6 - Commercial Modules
+- Quote -> order basic flow
+- Inventory basics and stock status
+- Credit ledger v1 and reminder actions
+
+Phase 7 - AI and Differentiation
+- Better palette recommendations (style/mood)
+- Cost estimator in decision flow
+- Dealer assistant prompts for quoting and follow-up
+
+Phase 8 - Platform Expansion (Only after retention and monetization proof)
+- Contractor assignment and tracking
+- Customer-facing extended app flow
+- Marketplace mechanics and ranking logic
+
+5) Engineering Plan for Immediate Next Sprint (5 to 7 days)
+Day 1
+- Stabilize wall-tab + brush interactions
+- Add visual hint overlays while brushing
+
+Day 2
+- Add erase mode for brush
+- Add undo/redo stack for mask edits
+
+Day 3
+- Add mask edge feathering for cleaner visual transitions
+- Improve compare slider UX
+
+Day 4
+- Add Contact Dealer form UI
+- Capture selected wall colors and preview reference
+
+Day 5
+- Add local lead list page
+- Add export of lead + preview package
+
+Day 6
+- Manual QA pass with varied room photos
+- Performance tuning on larger images
+
+Day 7
+- Pilot-ready release packaging
+- Demo script and test checklist
+
+6) Success Metrics by Stage
+Phase 1 metrics:
+- Smooth interaction at typical photo sizes
+- Accurate per-wall color assignment with tabs
+- Brush mode resolves auto-mask misses quickly
+
+Phase 2 metrics:
+- Contact action completion rate from preview sessions
+- Lead record quality and completeness
+
+Phase 3 metrics:
+- Dealer reports faster customer decisions
+- Repeat usage during actual in-store interactions
+
+7) Risks and Mitigations
+Risk: Auto wall detection still fails in unusual lighting
+- Mitigation: Keep brush mode primary fallback and add erase/undo
+
+Risk: Too many controls create user confusion
+- Mitigation: Keep one-screen flow and progressive controls
+
+Risk: Feature creep into full platform too early
+- Mitigation: Strict phase gates; no expansion without metric proof
+
+8) Team Execution Rules
+- Ship small increments every 1 to 3 days
+- Keep changes reversible and testable
+- Measure behavior before adding complexity
+- Preserve app speed over feature count
+
+9) Definition of Done for Current Milestone
+- Multi-wall tabs are stable
+- Brush + tap selection both work per tab
+- Black/dark shade testing clearly shows masking quality
+- Users can complete the full flow quickly and reliably
+
+10) Immediate Next Action
+- Implement brush erase mode + undo/redo, then add Contact Dealer capture.

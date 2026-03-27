@@ -194,6 +194,15 @@ body {
   inset: 0;
   clip-path: inset(0 0 0 50%);
   border-left: 2px solid rgba(29, 29, 31, 0.6);
+  pointer-events: none;
+}
+
+.canvas-wrap.picking {
+  cursor: crosshair;
+}
+
+.canvas-wrap.brushing {
+  cursor: cell;
 }
 
 .hidden {
@@ -279,6 +288,65 @@ body {
   gap: 8px;
   font-weight: 500;
   margin-bottom: 8px;
+}
+
+.mask-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.button.tiny {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+}
+
+.status-chip {
+  margin: 4px 0 8px;
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 0.8rem;
+  background: #f9f5eb;
+  color: #5a5248;
+}
+
+.status-chip.locked {
+  border-color: #b7421f;
+  color: #8b2f14;
+  background: #fbe6df;
+}
+
+.zone-tabs {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.zone-tab {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.zone-tab.active {
+  background: #1d1d1f;
+  border-color: #1d1d1f;
+  color: #fff;
+}
+
+.zone-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 1000px) {

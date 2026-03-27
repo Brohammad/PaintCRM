@@ -4,9 +4,17 @@ const beforeAfterToggle = document.getElementById("beforeAfterToggle");
 const compareToggle = document.getElementById("compareToggle");
 const smartMaskToggle = document.getElementById("smartMaskToggle");
 const naturalColorToggle = document.getElementById("naturalColorToggle");
+const pickWallToggle = document.getElementById("pickWallToggle");
+const resetWallBtn = document.getElementById("resetWallBtn");
+const brushMaskToggle = document.getElementById("brushMaskToggle");
+const clearBrushBtn = document.getElementById("clearBrushBtn");
+const addZoneBtn = document.getElementById("addZoneBtn");
+const removeZoneBtn = document.getElementById("removeZoneBtn");
+const brushSizeSlider = document.getElementById("brushSizeSlider");
 const opacitySlider = document.getElementById("opacitySlider");
 const sensitivitySlider = document.getElementById("sensitivitySlider");
 
+const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
 const compareCanvas = document.getElementById("compareCanvas");
 const previewCtx = previewCanvas.getContext("2d", { willReadFrequently: true });
@@ -14,32 +22,43 @@ const compareCtx = compareCanvas.getContext("2d", { willReadFrequently: true });
 
 const suggestionsEl = document.getElementById("suggestions");
 const compareSuggestionsEl = document.getElementById("compareSuggestions");
+const zoneTabsEl = document.getElementById("zoneTabs");
 const activeSwatchEl = document.getElementById("activeSwatch");
 const activeShadeNameEl = document.getElementById("activeShadeName");
 const activeShadeHexEl = document.getElementById("activeShadeHex");
 const canvasHint = document.getElementById("canvasHint");
+const maskStatusEl = document.getElementById("maskStatus");
 
 const BASE_SWATCHES = [
-  { name: "Calm Ivory", hex: "#E8DFCF" },
-  { name: "Warm Sand", hex: "#D7BFA0" },
-  { name: "Clay Blush", hex: "#C9987B" },
-  { name: "Olive Dust", hex: "#A9A57C" },
-  { name: "Misty Blue", hex: "#9AAFC2" },
-  { name: "Graphite Calm", hex: "#6F747C" },
-  { name: "Terracotta Sun", hex: "#BD6A45" },
-  { name: "Forest Chalk", hex: "#768B78" }
+  { name: "Signal Red", hex: "#FF1F1F" },
+  { name: "Electric Blue", hex: "#0066FF" },
+  { name: "Neon Green", hex: "#2CFF2C" },
+  { name: "Vivid Yellow", hex: "#FFE600" },
+  { name: "Hot Magenta", hex: "#FF00B8" },
+  { name: "Bright Cyan", hex: "#00E5FF" },
+  { name: "Deep Black", hex: "#0A0A0A" },
+  { name: "Charcoal", hex: "#232323" },
+  { name: "Pure White", hex: "#FDFDFD" }
 ];
+
+const MAX_ZONES = 5;
 
 const state = {
   originalImage: null,
-  activeShade: null,
-  compareShade: null,
-  shades: [],
   originalPixels: null,
   imageRect: null,
-  wallMask: null,
-  maskSensitivity: null
+  shades: [],
+  activeShade: null,
+  compareShade: null,
+  zones: [],
+  activeZoneId: null,
+  nextZoneId: 1,
+  isBrushing: false
 };
+
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
 
 function hexToRgb(hex) {
   const clean = hex.replace("#", "");
@@ -52,19 +71,6 @@ function hexToRgb(hex) {
     g: (value >> 8) & 255,
     b: value & 255
   };
-}
-
-function rgbToHex(r, g, b) {
-  const toHex = (v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function getPerceivedBrightness(r, g, b) {
-  return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
 function rgbToHsl(r, g, b) {
@@ -80,16 +86,9 @@ function rgbToHsl(r, g, b) {
 
   if (delta !== 0) {
     s = delta / (1 - Math.abs(2 * l - 1));
-    switch (max) {
-      case rn:
-        h = ((gn - bn) / delta) % 6;
-        break;
-      case gn:
-        h = (bn - rn) / delta + 2;
-        break;
-      default:
-        h = (rn - gn) / delta + 4;
-    }
+    if (max === rn) h = ((gn - bn) / delta) % 6;
+    else if (max === gn) h = (bn - rn) / delta + 2;
+    else h = (rn - gn) / delta + 4;
     h = (h * 60 + 360) % 360;
   }
 
@@ -104,7 +103,7 @@ function hslToRgb(h, s, l) {
   let g1 = 0;
   let b1 = 0;
 
-  if (hp >= 0 && hp < 1) {
+  if (hp < 1) {
     r1 = c;
     g1 = x;
   } else if (hp < 2) {
@@ -159,42 +158,30 @@ function isLikelyWallPixel(r, g, b, sensitivity) {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const sat = max === 0 ? 0 : (max - min) / max;
-  const brightness = getPerceivedBrightness(r, g, b);
-
-  const satThreshold = clamp(sensitivity / 100, 0.1, 0.6);
-  const brightnessLow = 45;
-  const brightnessHigh = 235;
-
-  return sat < satThreshold && brightness > brightnessLow && brightness < brightnessHigh;
+  const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+  return sat < clamp(sensitivity / 100, 0.1, 0.62) && brightness > 40 && brightness < 240;
 }
 
-function createSoftwareWallMask(pixels, sensitivity) {
+function createCandidatesMap(pixels, sensitivity) {
   const { width, height, data } = pixels;
-  const size = width * height;
-  const candidates = new Uint8Array(size);
-  const mask = new Uint8Array(size);
+  const candidates = new Uint8Array(width * height);
 
-  for (let i = 0, px = 0; i < size; i += 1, px += 4) {
-    const r = data[px];
-    const g = data[px + 1];
-    const b = data[px + 2];
-    if (isLikelyWallPixel(r, g, b, sensitivity)) {
-      candidates[i] = 1;
+  for (let p = 0, i = 0; p < candidates.length; p += 1, i += 4) {
+    if (isLikelyWallPixel(data[i], data[i + 1], data[i + 2], sensitivity)) {
+      candidates[p] = 1;
     }
   }
 
-  const seeds = [
-    [Math.floor(width * 0.5), Math.floor(height * 0.2)],
-    [Math.floor(width * 0.33), Math.floor(height * 0.25)],
-    [Math.floor(width * 0.66), Math.floor(height * 0.25)],
-    [Math.floor(width * 0.5), Math.floor(height * 0.35)]
-  ];
+  return { width, height, candidates };
+}
 
-  const queue = new Int32Array(size);
+function growRegion(candidates, width, height, seeds) {
+  const mask = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
   let head = 0;
   let tail = 0;
 
-  function trySeed(x, y) {
+  function seed(x, y) {
     if (x < 0 || y < 0 || x >= width || y >= height) return;
     const idx = y * width + x;
     if (!candidates[idx] || mask[idx]) return;
@@ -202,45 +189,42 @@ function createSoftwareWallMask(pixels, sensitivity) {
     queue[tail++] = idx;
   }
 
-  for (const [sx, sy] of seeds) {
-    if (tail > size - 5) break;
-    trySeed(sx, sy);
-  }
+  seeds.forEach(([x, y]) => seed(x, y));
 
   while (head < tail) {
-    const current = queue[head++];
-    const x = current % width;
-    const y = (current - x) / width;
+    const cur = queue[head++];
+    const x = cur % width;
+    const y = Math.floor(cur / width);
 
     if (x > 0) {
-      const left = current - 1;
-      if (candidates[left] && !mask[left]) {
-        mask[left] = 1;
-        queue[tail++] = left;
+      const n = cur - 1;
+      if (candidates[n] && !mask[n]) {
+        mask[n] = 1;
+        queue[tail++] = n;
       }
     }
 
     if (x < width - 1) {
-      const right = current + 1;
-      if (candidates[right] && !mask[right]) {
-        mask[right] = 1;
-        queue[tail++] = right;
+      const n = cur + 1;
+      if (candidates[n] && !mask[n]) {
+        mask[n] = 1;
+        queue[tail++] = n;
       }
     }
 
     if (y > 0) {
-      const up = current - width;
-      if (candidates[up] && !mask[up]) {
-        mask[up] = 1;
-        queue[tail++] = up;
+      const n = cur - width;
+      if (candidates[n] && !mask[n]) {
+        mask[n] = 1;
+        queue[tail++] = n;
       }
     }
 
     if (y < height - 1) {
-      const down = current + width;
-      if (candidates[down] && !mask[down]) {
-        mask[down] = 1;
-        queue[tail++] = down;
+      const n = cur + width;
+      if (candidates[n] && !mask[n]) {
+        mask[n] = 1;
+        queue[tail++] = n;
       }
     }
   }
@@ -248,60 +232,127 @@ function createSoftwareWallMask(pixels, sensitivity) {
   return mask;
 }
 
-function tintPixels(pixels, shadeRgb, opacity, sensitivity, wallMask) {
-  const data = new Uint8ClampedArray(pixels.data);
-  const blend = opacity / 100;
-
-  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-
-    if (wallMask) {
-      if (!wallMask[p]) continue;
-    } else if (!isLikelyWallPixel(r, g, b, sensitivity)) {
-      continue;
+function smoothMask(mask, width, height) {
+  function morph(src, mode) {
+    const out = new Uint8Array(src.length);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let active = 0;
+        let total = 0;
+        for (let ny = y - 1; ny <= y + 1; ny += 1) {
+          if (ny < 0 || ny >= height) continue;
+          for (let nx = x - 1; nx <= x + 1; nx += 1) {
+            if (nx < 0 || nx >= width) continue;
+            total += 1;
+            if (src[ny * width + nx]) active += 1;
+          }
+        }
+        out[y * width + x] = mode === "dilate" ? (active > 0 ? 1 : 0) : (active >= total ? 1 : 0);
+      }
     }
-
-    data[i] = Math.round(r * (1 - blend) + shadeRgb.r * blend);
-    data[i + 1] = Math.round(g * (1 - blend) + shadeRgb.g * blend);
-    data[i + 2] = Math.round(b * (1 - blend) + shadeRgb.b * blend);
+    return out;
   }
 
-  return new ImageData(data, pixels.width, pixels.height);
+  return morph(morph(mask, "dilate"), "erode");
 }
 
-function tintPixelsNatural(pixels, shadeRgb, opacity, sensitivity, wallMask) {
-  const data = new Uint8ClampedArray(pixels.data);
-  const blend = opacity / 100;
-  const target = rgbToHsl(shadeRgb.r, shadeRgb.g, shadeRgb.b);
+function createAutoMask(pixels, sensitivity) {
+  const { width, height, candidates } = createCandidatesMap(pixels, sensitivity);
+  const visited = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  let bestIndices = null;
+  let bestScore = -1;
 
-  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
+  for (let i = 0; i < candidates.length; i += 1) {
+    if (!candidates[i] || visited[i]) continue;
 
-    if (wallMask) {
-      if (!wallMask[p]) continue;
-    } else if (!isLikelyWallPixel(r, g, b, sensitivity)) {
-      continue;
+    let head = 0;
+    let tail = 0;
+    let area = 0;
+    let ySum = 0;
+    const indices = [];
+
+    queue[tail++] = i;
+    visited[i] = 1;
+
+    while (head < tail) {
+      const cur = queue[head++];
+      indices.push(cur);
+      area += 1;
+      ySum += Math.floor(cur / width);
+      const x = cur % width;
+
+      if (x > 0) {
+        const n = cur - 1;
+        if (candidates[n] && !visited[n]) {
+          visited[n] = 1;
+          queue[tail++] = n;
+        }
+      }
+
+      if (x < width - 1) {
+        const n = cur + 1;
+        if (candidates[n] && !visited[n]) {
+          visited[n] = 1;
+          queue[tail++] = n;
+        }
+      }
+
+      if (cur - width >= 0) {
+        const n = cur - width;
+        if (candidates[n] && !visited[n]) {
+          visited[n] = 1;
+          queue[tail++] = n;
+        }
+      }
+
+      if (cur + width < candidates.length) {
+        const n = cur + width;
+        if (candidates[n] && !visited[n]) {
+          visited[n] = 1;
+          queue[tail++] = n;
+        }
+      }
     }
 
-    const source = rgbToHsl(r, g, b);
+    if (area < Math.max(300, Math.floor(candidates.length * 0.004))) continue;
 
-    // Preserve image luminance and detail while shifting color toward target shade.
-    const mapped = hslToRgb(
-      target.h,
-      clamp(source.s * 0.35 + target.s * 0.65, 0, 1),
-      clamp(source.l * 0.9 + target.l * 0.1, 0, 1)
-    );
-
-    data[i] = Math.round(r * (1 - blend) + mapped.r * blend);
-    data[i + 1] = Math.round(g * (1 - blend) + mapped.g * blend);
-    data[i + 2] = Math.round(b * (1 - blend) + mapped.b * blend);
+    const score = area * clamp(1.35 - (ySum / area) / height, 0.2, 1.35);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndices = indices;
+    }
   }
 
-  return new ImageData(data, pixels.width, pixels.height);
+  if (!bestIndices) {
+    const seeds = [
+      [Math.floor(width * 0.5), Math.floor(height * 0.2)],
+      [Math.floor(width * 0.33), Math.floor(height * 0.25)],
+      [Math.floor(width * 0.66), Math.floor(height * 0.25)]
+    ];
+    return smoothMask(growRegion(candidates, width, height, seeds), width, height);
+  }
+
+  const mask = new Uint8Array(width * height);
+  bestIndices.forEach((idx) => {
+    mask[idx] = 1;
+  });
+
+  for (let y = Math.floor(height * 0.84); y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      mask[y * width + x] = 0;
+    }
+  }
+
+  return smoothMask(mask, width, height);
+}
+
+function createSeedMask(pixels, sensitivity, seed) {
+  const { width, height, candidates } = createCandidatesMap(pixels, sensitivity);
+  const sx = clamp(Math.round(seed.x), 0, width - 1);
+  const sy = clamp(Math.round(seed.y), 0, height - 1);
+  if (!candidates[sy * width + sx]) return createAutoMask(pixels, sensitivity);
+  return smoothMask(growRegion(candidates, width, height, [[sx, sy]]), width, height);
 }
 
 function averageColorSample(pixels) {
@@ -310,13 +361,12 @@ function averageColorSample(pixels) {
   let b = 0;
   let count = 0;
 
-  const step = 24;
-  for (let y = 0; y < pixels.height; y += step) {
-    for (let x = 0; x < pixels.width; x += step) {
-      const idx = (y * pixels.width + x) * 4;
-      r += pixels.data[idx];
-      g += pixels.data[idx + 1];
-      b += pixels.data[idx + 2];
+  for (let y = 0; y < pixels.height; y += 24) {
+    for (let x = 0; x < pixels.width; x += 24) {
+      const i = (y * pixels.width + x) * 4;
+      r += pixels.data[i];
+      g += pixels.data[i + 1];
+      b += pixels.data[i + 2];
       count += 1;
     }
   }
@@ -328,64 +378,258 @@ function averageColorSample(pixels) {
   };
 }
 
-function colorDistance(a, b) {
-  return Math.sqrt(
-    (a.r - b.r) ** 2 +
-      (a.g - b.g) ** 2 +
-      (a.b - b.b) ** 2
-  );
-}
-
-function buildSuggestions(baseColor) {
-  const ranked = BASE_SWATCHES
-    .map((shade) => {
-      const rgb = hexToRgb(shade.hex);
+function buildSuggestions(base) {
+  return BASE_SWATCHES
+    .map((s) => {
+      const rgb = hexToRgb(s.hex);
       return {
-        ...shade,
-        distance: colorDistance(baseColor, rgb)
+        ...s,
+        d: Math.sqrt((base.r - rgb.r) ** 2 + (base.g - rgb.g) ** 2 + (base.b - rgb.b) ** 2)
       };
     })
-    .sort((a, b) => a.distance - b.distance);
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 5);
+}
 
-  return ranked.slice(0, 5);
+function createZone(label, shadeHex) {
+  return {
+    id: state.nextZoneId++,
+    label,
+    shadeHex,
+    seed: null,
+    autoMask: null,
+    autoSensitivity: null,
+    manualMask: null,
+    width: null,
+    height: null
+  };
+}
+
+function getActiveZone() {
+  return state.zones.find((z) => z.id === state.activeZoneId) || null;
+}
+
+function ensureZoneBuffers(zone, pixels) {
+  if (zone.width === pixels.width && zone.height === pixels.height && zone.manualMask) return;
+  zone.width = pixels.width;
+  zone.height = pixels.height;
+  zone.manualMask = new Uint8Array(zone.width * zone.height);
+  zone.autoMask = null;
+  zone.autoSensitivity = null;
+}
+
+function hasManualMask(zone) {
+  if (!zone.manualMask) return false;
+  for (let i = 0; i < zone.manualMask.length; i += 1) {
+    if (zone.manualMask[i]) return true;
+  }
+  return false;
+}
+
+function invalidateZoneAuto(zone) {
+  zone.autoMask = null;
+  zone.autoSensitivity = null;
 }
 
 function setControlsEnabled(enabled) {
-  exportBtn.disabled = !enabled;
-  beforeAfterToggle.disabled = !enabled;
-  compareToggle.disabled = !enabled;
-  smartMaskToggle.disabled = !enabled;
-  naturalColorToggle.disabled = !enabled;
-  opacitySlider.disabled = !enabled;
-  sensitivitySlider.disabled = !enabled;
+  [
+    exportBtn,
+    beforeAfterToggle,
+    compareToggle,
+    smartMaskToggle,
+    naturalColorToggle,
+    pickWallToggle,
+    resetWallBtn,
+    brushMaskToggle,
+    clearBrushBtn,
+    addZoneBtn,
+    removeZoneBtn,
+    brushSizeSlider,
+    opacitySlider,
+    sensitivitySlider
+  ].forEach((el) => {
+    el.disabled = !enabled;
+  });
 }
 
-function ensureWallMask(pixels, sensitivity) {
-  if (!smartMaskToggle.checked) return null;
-  if (
-    state.wallMask &&
-    state.maskSensitivity === sensitivity &&
-    state.wallMask.length === pixels.width * pixels.height
-  ) {
-    return state.wallMask;
+function renderZoneTabs() {
+  zoneTabsEl.innerHTML = "";
+  state.zones.forEach((zone) => {
+    const button = document.createElement("button");
+    button.className = "zone-tab";
+    if (zone.id === state.activeZoneId) button.classList.add("active");
+    button.textContent = zone.label;
+    button.addEventListener("click", () => setActiveZone(zone.id));
+    zoneTabsEl.appendChild(button);
+  });
+
+  addZoneBtn.disabled = !state.originalImage || state.zones.length >= MAX_ZONES;
+  removeZoneBtn.disabled = !state.originalImage || state.zones.length <= 1;
+}
+
+function updateMaskStatus() {
+  const zone = getActiveZone();
+  const name = zone ? zone.label : "Wall";
+
+  if (!smartMaskToggle.checked) {
+    maskStatusEl.textContent = `${name}: smart mask off`;
+    maskStatusEl.classList.remove("locked");
+    return;
   }
 
-  state.wallMask = createSoftwareWallMask(pixels, sensitivity);
-  state.maskSensitivity = sensitivity;
-  return state.wallMask;
+  if (brushMaskToggle.checked) {
+    maskStatusEl.textContent = `${name}: brush mode active`;
+    maskStatusEl.classList.add("locked");
+    return;
+  }
+
+  if (pickWallToggle.checked) {
+    maskStatusEl.textContent = `${name}: tap inside image`;
+    maskStatusEl.classList.remove("locked");
+    return;
+  }
+
+  if (zone && hasManualMask(zone)) {
+    maskStatusEl.textContent = `${name}: manual brush mask`;
+    maskStatusEl.classList.add("locked");
+    return;
+  }
+
+  if (zone && zone.seed) {
+    maskStatusEl.textContent = `${name}: locked from tap`;
+    maskStatusEl.classList.add("locked");
+    return;
+  }
+
+  maskStatusEl.textContent = `${name}: auto wall mode`;
+  maskStatusEl.classList.remove("locked");
 }
 
 function renderSwatches(container, shades, onClick, activeHex) {
   container.innerHTML = "";
   shades.forEach((shade) => {
-    const swatch = document.createElement("button");
-    swatch.className = "swatch";
-    swatch.title = `${shade.name} ${shade.hex}`;
-    swatch.style.background = shade.hex;
-    if (shade.hex === activeHex) swatch.classList.add("active");
-    swatch.addEventListener("click", () => onClick(shade));
-    container.appendChild(swatch);
+    const button = document.createElement("button");
+    button.className = "swatch";
+    if (shade.hex === activeHex) button.classList.add("active");
+    button.style.background = shade.hex;
+    button.title = `${shade.name} ${shade.hex}`;
+    button.addEventListener("click", () => onClick(shade));
+    container.appendChild(button);
   });
+}
+
+function setActiveShade(shade) {
+  state.activeShade = shade;
+  const zone = getActiveZone();
+  if (zone) zone.shadeHex = shade.hex;
+
+  activeSwatchEl.style.background = shade.hex;
+  activeShadeNameEl.textContent = shade.name;
+  activeShadeHexEl.textContent = shade.hex;
+  renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
+  drawPreview();
+}
+
+function setCompareShade(shade) {
+  state.compareShade = shade;
+  renderSwatches(compareSuggestionsEl, state.shades, setCompareShade, shade.hex);
+  drawCompareIfEnabled();
+}
+
+function setActiveZone(zoneId) {
+  state.activeZoneId = zoneId;
+  const zone = getActiveZone();
+  if (!zone) return;
+
+  const shade = state.shades.find((s) => s.hex === zone.shadeHex) || state.shades[0];
+  state.activeShade = shade;
+
+  activeSwatchEl.style.background = shade.hex;
+  activeShadeNameEl.textContent = shade.name;
+  activeShadeHexEl.textContent = shade.hex;
+
+  renderZoneTabs();
+  renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
+  updateMaskStatus();
+  drawPreview();
+}
+
+function getZoneMask(zone, pixels, sensitivity) {
+  ensureZoneBuffers(zone, pixels);
+
+  if (hasManualMask(zone)) return zone.manualMask;
+  if (zone.autoMask && zone.autoSensitivity === sensitivity) return zone.autoMask;
+
+  zone.autoMask = zone.seed
+    ? createSeedMask(pixels, sensitivity, zone.seed)
+    : createAutoMask(pixels, sensitivity);
+  zone.autoSensitivity = sensitivity;
+  return zone.autoMask;
+}
+
+function applyTint(data, width, height, mask, shadeRgb, opacity, useNatural) {
+  const blend = opacity / 100;
+  const target = useNatural ? rgbToHsl(shadeRgb.r, shadeRgb.g, shadeRgb.b) : null;
+
+  for (let p = 0, i = 0; p < width * height; p += 1, i += 4) {
+    if (!mask[p]) continue;
+
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+
+    if (useNatural) {
+      const src = rgbToHsl(r, g, b);
+      const mapped = hslToRgb(
+        target.h,
+        clamp(src.s * 0.35 + target.s * 0.65, 0, 1),
+        clamp(src.l * 0.9 + target.l * 0.1, 0, 1)
+      );
+      data[i] = Math.round(r * (1 - blend) + mapped.r * blend);
+      data[i + 1] = Math.round(g * (1 - blend) + mapped.g * blend);
+      data[i + 2] = Math.round(b * (1 - blend) + mapped.b * blend);
+    } else {
+      data[i] = Math.round(r * (1 - blend) + shadeRgb.r * blend);
+      data[i + 1] = Math.round(g * (1 - blend) + shadeRgb.g * blend);
+      data[i + 2] = Math.round(b * (1 - blend) + shadeRgb.b * blend);
+    }
+  }
+}
+
+function renderTinted(pixels, compareHex = null) {
+  const opacity = Number(opacitySlider.value);
+  const sensitivity = Number(sensitivitySlider.value);
+  const useNatural = naturalColorToggle.checked;
+  const data = new Uint8ClampedArray(pixels.data);
+
+  if (!smartMaskToggle.checked) {
+    const mask = new Uint8Array(pixels.width * pixels.height);
+    for (let p = 0, i = 0; p < mask.length; p += 1, i += 4) {
+      if (isLikelyWallPixel(data[i], data[i + 1], data[i + 2], sensitivity)) {
+        mask[p] = 1;
+      }
+    }
+    applyTint(data, pixels.width, pixels.height, mask, hexToRgb(compareHex || state.activeShade.hex), opacity, useNatural);
+    return new ImageData(data, pixels.width, pixels.height);
+  }
+
+  const occupied = new Uint8Array(pixels.width * pixels.height);
+  for (const zone of state.zones) {
+    const zoneMask = getZoneMask(zone, pixels, sensitivity);
+    const uniqueMask = new Uint8Array(zoneMask.length);
+
+    for (let i = 0; i < zoneMask.length; i += 1) {
+      if (zoneMask[i] && !occupied[i]) {
+        uniqueMask[i] = 1;
+        occupied[i] = 1;
+      }
+    }
+
+    const shadeHex = zone.id === state.activeZoneId && compareHex ? compareHex : zone.shadeHex;
+    applyTint(data, pixels.width, pixels.height, uniqueMask, hexToRgb(shadeHex), opacity, useNatural);
+  }
+
+  return new ImageData(data, pixels.width, pixels.height);
 }
 
 function drawPreview() {
@@ -394,20 +638,12 @@ function drawPreview() {
   const fit = drawImageFit(previewCtx, state.originalImage, previewCanvas);
   state.imageRect = fit;
   const pixels = previewCtx.getImageData(fit.dx, fit.dy, fit.drawWidth, fit.drawHeight);
-
   state.originalPixels = pixels;
 
   if (beforeAfterToggle.checked) {
     previewCtx.putImageData(pixels, fit.dx, fit.dy);
   } else {
-    const opacity = Number(opacitySlider.value);
-    const sensitivity = Number(sensitivitySlider.value);
-    const wallMask = ensureWallMask(pixels, sensitivity);
-    const shadeRgb = hexToRgb(state.activeShade.hex);
-    const tinted = naturalColorToggle.checked
-      ? tintPixelsNatural(pixels, shadeRgb, opacity, sensitivity, wallMask)
-      : tintPixels(pixels, shadeRgb, opacity, sensitivity, wallMask);
-    previewCtx.putImageData(tinted, fit.dx, fit.dy);
+    previewCtx.putImageData(renderTinted(pixels), fit.dx, fit.dy);
   }
 
   drawCompareIfEnabled();
@@ -425,32 +661,123 @@ function drawCompareIfEnabled() {
   compareCtx.drawImage(state.originalImage, fit.dx, fit.dy, fit.drawWidth, fit.drawHeight);
 
   const pixels = state.originalPixels || compareCtx.getImageData(fit.dx, fit.dy, fit.drawWidth, fit.drawHeight);
-  const opacity = Number(opacitySlider.value);
-  const sensitivity = Number(sensitivitySlider.value);
-  const wallMask = ensureWallMask(pixels, sensitivity);
-  const shadeRgb = hexToRgb(state.compareShade.hex);
-  const tinted = naturalColorToggle.checked
-    ? tintPixelsNatural(pixels, shadeRgb, opacity, sensitivity, wallMask)
-    : tintPixels(pixels, shadeRgb, opacity, sensitivity, wallMask);
-  compareCtx.putImageData(tinted, fit.dx, fit.dy);
+  compareCtx.putImageData(renderTinted(pixels, state.compareShade.hex), fit.dx, fit.dy);
 }
 
-function setActiveShade(shade) {
-  state.activeShade = shade;
-  activeSwatchEl.style.background = shade.hex;
-  activeShadeNameEl.textContent = shade.name;
-  activeShadeHexEl.textContent = shade.hex;
+function getLocalPoint(event) {
+  if (!state.imageRect || !state.originalPixels) return null;
+  const rect = previewCanvas.getBoundingClientRect();
+  const x = Math.floor((event.clientX - rect.left) * (previewCanvas.width / rect.width) - state.imageRect.dx);
+  const y = Math.floor((event.clientY - rect.top) * (previewCanvas.height / rect.height) - state.imageRect.dy);
+  if (x < 0 || y < 0 || x >= state.originalPixels.width || y >= state.originalPixels.height) return null;
+  return { x, y };
+}
 
-  renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
-  renderSwatches(compareSuggestionsEl, state.shades, setCompareShade, state.compareShade?.hex);
+function handleCanvasPick(event) {
+  if (!pickWallToggle.checked || brushMaskToggle.checked) return;
+  const zone = getActiveZone();
+  if (!zone) return;
 
+  const pt = getLocalPoint(event);
+  if (!pt) {
+    maskStatusEl.textContent = "Tap inside room image";
+    return;
+  }
+
+  zone.seed = pt;
+  ensureZoneBuffers(zone, state.originalPixels);
+  zone.manualMask.fill(0);
+  invalidateZoneAuto(zone);
+
+  pickWallToggle.checked = false;
+  canvasWrap.classList.remove("picking");
+  updateMaskStatus();
   drawPreview();
 }
 
-function setCompareShade(shade) {
-  state.compareShade = shade;
-  renderSwatches(compareSuggestionsEl, state.shades, setCompareShade, shade.hex);
-  drawCompareIfEnabled();
+function paintBrush(point) {
+  const zone = getActiveZone();
+  if (!zone || !state.originalPixels) return;
+
+  ensureZoneBuffers(zone, state.originalPixels);
+  const radius = Number(brushSizeSlider.value);
+
+  for (let dy = -radius; dy <= radius; dy += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      if (dx * dx + dy * dy > radius * radius) continue;
+      const nx = point.x + dx;
+      const ny = point.y + dy;
+      if (nx < 0 || ny < 0 || nx >= zone.width || ny >= zone.height) continue;
+      zone.manualMask[ny * zone.width + nx] = 1;
+    }
+  }
+
+  zone.seed = null;
+  invalidateZoneAuto(zone);
+}
+
+function onBrushDown(event) {
+  if (!brushMaskToggle.checked) return;
+  const pt = getLocalPoint(event);
+  if (!pt) return;
+  state.isBrushing = true;
+  paintBrush(pt);
+  drawPreview();
+  event.preventDefault();
+}
+
+function onBrushMove(event) {
+  if (!state.isBrushing || !brushMaskToggle.checked) return;
+  const pt = getLocalPoint(event);
+  if (!pt) return;
+  paintBrush(pt);
+  drawPreview();
+  event.preventDefault();
+}
+
+function onBrushUp() {
+  if (!state.isBrushing) return;
+  state.isBrushing = false;
+  updateMaskStatus();
+}
+
+function clearBrushMask() {
+  const zone = getActiveZone();
+  if (!zone || !state.originalPixels) return;
+  ensureZoneBuffers(zone, state.originalPixels);
+  zone.manualMask.fill(0);
+  updateMaskStatus();
+  drawPreview();
+}
+
+function resetWallSelection() {
+  const zone = getActiveZone();
+  if (!zone) return;
+
+  zone.seed = null;
+  if (zone.manualMask) zone.manualMask.fill(0);
+  invalidateZoneAuto(zone);
+
+  pickWallToggle.checked = false;
+  brushMaskToggle.checked = false;
+  canvasWrap.classList.remove("picking", "brushing");
+  updateMaskStatus();
+  drawPreview();
+}
+
+function addWallTab() {
+  if (state.zones.length >= MAX_ZONES) return;
+  const zone = createZone(`Wall ${state.zones.length + 1}`, state.activeShade.hex);
+  state.zones.push(zone);
+  setActiveZone(zone.id);
+}
+
+function removeActiveWallTab() {
+  if (state.zones.length <= 1) return;
+  const idx = state.zones.findIndex((z) => z.id === state.activeZoneId);
+  if (idx === -1) return;
+  state.zones.splice(idx, 1);
+  setActiveZone(state.zones[Math.max(0, idx - 1)].id);
 }
 
 function initializeShadesFromImage() {
@@ -461,15 +788,22 @@ function initializeShadesFromImage() {
   state.shades = buildSuggestions(dominant);
   state.activeShade = state.shades[0];
   state.compareShade = state.shades[1] || state.shades[0];
-  state.wallMask = null;
-  state.maskSensitivity = null;
+
+  state.zones = [createZone("Wall 1", state.activeShade.hex)];
+  state.activeZoneId = state.zones[0].id;
 
   renderSwatches(suggestionsEl, state.shades, setActiveShade, state.activeShade.hex);
   renderSwatches(compareSuggestionsEl, state.shades, setCompareShade, state.compareShade.hex);
+  renderZoneTabs();
 
-  setActiveShade(state.activeShade);
+  activeSwatchEl.style.background = state.activeShade.hex;
+  activeShadeNameEl.textContent = state.activeShade.name;
+  activeShadeHexEl.textContent = state.activeShade.hex;
+
   setControlsEnabled(true);
+  updateMaskStatus();
   canvasHint.classList.add("hidden");
+  drawPreview();
 }
 
 function handleImageUpload(file) {
@@ -487,49 +821,62 @@ function handleImageUpload(file) {
 
 function exportPreview() {
   if (!state.originalImage) return;
-
   const link = document.createElement("a");
   link.download = `paint-preview-${Date.now()}.png`;
   link.href = previewCanvas.toDataURL("image/png");
   link.click();
-
-  if (navigator.share && navigator.canShare) {
-    previewCanvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const file = new File([blob], "paint-preview.png", { type: "image/png" });
-      if (navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({
-            title: "Paint Preview",
-            text: `Preview shade: ${state.activeShade?.name ?? "selected"}`,
-            files: [file]
-          });
-        } catch {
-          // User canceled share action.
-        }
-      }
-    });
-  }
 }
 
 imageInput.addEventListener("change", (event) => {
   const file = event.target.files?.[0];
-  if (!file) return;
-  handleImageUpload(file);
+  if (file) handleImageUpload(file);
 });
 
 opacitySlider.addEventListener("input", drawPreview);
 sensitivitySlider.addEventListener("input", () => {
-  state.wallMask = null;
-  state.maskSensitivity = null;
+  state.zones.forEach((z) => invalidateZoneAuto(z));
   drawPreview();
 });
 beforeAfterToggle.addEventListener("change", drawPreview);
 compareToggle.addEventListener("change", drawCompareIfEnabled);
 smartMaskToggle.addEventListener("change", () => {
-  state.wallMask = null;
-  state.maskSensitivity = null;
+  if (!smartMaskToggle.checked) {
+    pickWallToggle.checked = false;
+    brushMaskToggle.checked = false;
+    canvasWrap.classList.remove("picking", "brushing");
+  }
+  updateMaskStatus();
   drawPreview();
 });
 naturalColorToggle.addEventListener("change", drawPreview);
+
+pickWallToggle.addEventListener("change", () => {
+  if (pickWallToggle.checked) {
+    brushMaskToggle.checked = false;
+    canvasWrap.classList.remove("brushing");
+  }
+  canvasWrap.classList.toggle("picking", pickWallToggle.checked);
+  updateMaskStatus();
+});
+
+brushMaskToggle.addEventListener("change", () => {
+  if (brushMaskToggle.checked) {
+    pickWallToggle.checked = false;
+    canvasWrap.classList.remove("picking");
+  }
+  canvasWrap.classList.toggle("brushing", brushMaskToggle.checked);
+  updateMaskStatus();
+});
+
+resetWallBtn.addEventListener("click", resetWallSelection);
+clearBrushBtn.addEventListener("click", clearBrushMask);
+addZoneBtn.addEventListener("click", addWallTab);
+removeZoneBtn.addEventListener("click", removeActiveWallTab);
+
+previewCanvas.addEventListener("click", handleCanvasPick);
+previewCanvas.addEventListener("pointerdown", onBrushDown);
+previewCanvas.addEventListener("pointermove", onBrushMove);
+window.addEventListener("pointerup", onBrushUp);
+window.addEventListener("pointercancel", onBrushUp);
+
 exportBtn.addEventListener("click", exportPreview);
