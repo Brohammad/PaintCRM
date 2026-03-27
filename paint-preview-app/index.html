@@ -95,6 +95,11 @@
           <section>
             <h3>Preview Controls</h3>
             <label class="toggle">
+              <input id="mlAssistToggle" type="checkbox" checked disabled />
+              <span>ML wall assist (beta)</span>
+            </label>
+            <p id="mlStatus" class="status-chip">ML: loading model...</p>
+            <label class="toggle">
               <input id="smartMaskToggle" type="checkbox" checked disabled />
               <span>Smart wall mask (software)</span>
             </label>
@@ -116,6 +121,16 @@
               </label>
               <button id="clearBrushBtn" class="button tiny ghost" disabled>Clear Brush</button>
             </div>
+            <div class="mask-actions split-start">
+              <label class="toggle">
+                <input id="brushEraseToggle" type="checkbox" disabled />
+                <span>Erase mode</span>
+              </label>
+              <div class="inline-actions">
+                <button id="undoMaskBtn" class="button tiny ghost" disabled>Undo</button>
+                <button id="redoMaskBtn" class="button tiny ghost" disabled>Redo</button>
+              </div>
+            </div>
             <label class="slider-label">
               Brush size
               <input id="brushSizeSlider" type="range" min="6" max="80" value="24" disabled />
@@ -129,6 +144,10 @@
               Wall sensitivity
               <input id="sensitivitySlider" type="range" min="5" max="60" value="25" disabled />
             </label>
+            <label class="slider-label">
+              Edge feather
+              <input id="edgeFeatherSlider" type="range" min="0" max="8" value="3" disabled />
+            </label>
           </section>
 
           <section>
@@ -140,6 +159,8 @@
       </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.19.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/deeplab@0.2.1/dist/deeplab.min.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

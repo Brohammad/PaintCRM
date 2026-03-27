@@ -298,6 +298,16 @@ body {
   margin: 8px 0;
 }
 
+.mask-actions.split-start {
+  justify-content: flex-start;
+}
+
+.inline-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+}
+
 .button.tiny {
   padding: 6px 10px;
   font-size: 0.82rem;
@@ -318,6 +328,24 @@ body {
   border-color: #b7421f;
   color: #8b2f14;
   background: #fbe6df;
+}
+
+.status-chip.ok {
+  border-color: #217346;
+  color: #1f5f3b;
+  background: #e7f7ee;
+}
+
+.status-chip.warn {
+  border-color: #b98a1f;
+  color: #7b5c16;
+  background: #fbf3de;
+}
+
+.status-chip.error {
+  border-color: #b12424;
+  color: #7f1b1b;
+  background: #fbe3e3;
 }
 
 .zone-tabs {
