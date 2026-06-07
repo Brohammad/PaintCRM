@@ -24,6 +24,15 @@ const contactBtn = document.getElementById("contactBtn");
 const leadsBtn = document.getElementById("leadsBtn");
 const leadsCountEl = document.getElementById("leadsCount");
 const restoreDraftBtn = document.getElementById("restoreDraftBtn");
+const clearSessionBtn = document.getElementById("clearSessionBtn");
+
+// Shade catalog + search
+const shadeSearchInput = document.getElementById("shadeSearch");
+const shadeSearchResults = document.getElementById("shadeSearchResults");
+const activeShadeBrandEl = document.getElementById("activeShadeBrand");
+const costEstimateEl = document.getElementById("costEstimate");
+const costLitresEl = document.getElementById("costLitres");
+const costTotalEl = document.getElementById("costTotal");
 
 const contactModal = document.getElementById("contactModal");
 const closeContactBtn = document.getElementById("closeContactBtn");
@@ -67,17 +76,24 @@ const canvasHint = document.getElementById("canvasHint");
 const maskStatusEl = document.getElementById("maskStatus");
 const mlStatusEl = document.getElementById("mlStatus");
 
-const BASE_SWATCHES = [
-  { name: "Signal Red", hex: "#FF1F1F" },
-  { name: "Electric Blue", hex: "#0066FF" },
-  { name: "Neon Green", hex: "#2CFF2C" },
-  { name: "Vivid Yellow", hex: "#FFE600" },
-  { name: "Hot Magenta", hex: "#FF00B8" },
-  { name: "Bright Cyan", hex: "#00E5FF" },
-  { name: "Deep Black", hex: "#0A0A0A" },
-  { name: "Charcoal", hex: "#232323" },
-  { name: "Pure White", hex: "#FDFDFD" }
+// Populated from shades.json at startup; fallback used if fetch fails
+let SHADE_CATALOG = [];
+
+const FALLBACK_SWATCHES = [
+  { id: "f1", name: "Mogra White",   brand: "Asian Paints", collection: "Royale", hex: "#F5F0E8", pricePerL: 320 },
+  { id: "f2", name: "Warm Sand",     brand: "Dulux",        collection: "Silk",   hex: "#D8C098", pricePerL: 290 },
+  { id: "f3", name: "Fired Earth",   brand: "Dulux",        collection: "Silk",   hex: "#B85840", pricePerL: 290 },
+  { id: "f4", name: "Peacock Teal",  brand: "Asian Paints", collection: "Royale", hex: "#287878", pricePerL: 320 },
+  { id: "f5", name: "Midnight Navy", brand: "Asian Paints", collection: "Royale", hex: "#102050", pricePerL: 320 },
+  { id: "f6", name: "Wisteria",      brand: "Nerolac",      collection: "Impression", hex: "#A880C0", pricePerL: 260 },
+  { id: "f7", name: "Charcoal Slate",brand: "Asian Paints", collection: "Royale", hex: "#383838", pricePerL: 320 },
+  { id: "f8", name: "Soot Black",    brand: "Asian Paints", collection: "Royale", hex: "#141414", pricePerL: 320 },
+  { id: "f9", name: "Bridal Veil",   brand: "Nerolac",      collection: "Impression", hex: "#F8F2E8", pricePerL: 260 }
 ];
+
+// Standard room estimate: ~40 sq metres (2 coats), ~10–12 sq m per litre
+const ROOM_SQ_M = 40;
+const COVERAGE_SQ_M_PER_L = 11;
 
 const MAX_ZONES = 5;
 const MAX_MASK_HISTORY = 20;
@@ -107,6 +123,40 @@ const LEADS_STORAGE_KEY = "paintcrm_leads_v1";
 const DRAFT_STORAGE_KEY = "paintcrm_draft_v1";
 let leads = [];
 let currentDetailLeadId = null;
+
+async function loadShadeCatalog() {
+  try {
+    const res = await fetch("shades.json");
+    if (!res.ok) throw new Error("fetch failed");
+    SHADE_CATALOG = await res.json();
+  } catch {
+    SHADE_CATALOG = FALLBACK_SWATCHES;
+  }
+}
+
+function findShadeInCatalog(hex) {
+  const h = (hex || "").toLowerCase();
+  return SHADE_CATALOG.find((s) => s.hex.toLowerCase() === h) || null;
+}
+
+function catalogEntry(shade) {
+  // shade may already be a full catalog entry or a minimal {name, hex} from old data
+  return findShadeInCatalog(shade.hex) || shade;
+}
+
+function updateCostEstimate(shade) {
+  if (!shade || !costEstimateEl) return;
+  const entry = catalogEntry(shade);
+  if (!entry.pricePerL) {
+    costEstimateEl.classList.add("hidden");
+    return;
+  }
+  const litres = Math.ceil((ROOM_SQ_M * 2) / COVERAGE_SQ_M_PER_L); // 2 coats
+  const total = litres * entry.pricePerL;
+  costLitresEl.textContent = `~${litres}L for a standard room (2 coats)`;
+  costTotalEl.textContent = `Est. ₹${total.toLocaleString("en-IN")} @ ₹${entry.pricePerL}/L`;
+  costEstimateEl.classList.remove("hidden");
+}
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -811,7 +861,8 @@ function averageColorSample(pixels) {
 }
 
 function buildSuggestions(base) {
-  return BASE_SWATCHES
+  const catalog = SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES;
+  return catalog
     .map((s) => {
       const rgb = hexToRgb(s.hex);
       return {
@@ -820,7 +871,7 @@ function buildSuggestions(base) {
       };
     })
     .sort((a, b) => a.d - b.d)
-    .slice(0, 5);
+    .slice(0, 6);
 }
 
 function createZone(label, shadeHex) {
@@ -1023,9 +1074,16 @@ function setActiveShade(shade) {
   const zone = getActiveZone();
   if (zone) zone.shadeHex = shade.hex;
 
+  const entry = catalogEntry(shade);
   activeSwatchEl.style.background = shade.hex;
-  activeShadeNameEl.textContent = shade.name;
+  activeShadeNameEl.textContent = entry.name || shade.name;
   activeShadeHexEl.textContent = shade.hex;
+  if (activeShadeBrandEl) {
+    activeShadeBrandEl.textContent = entry.brand
+      ? `${entry.brand} — ${entry.collection || ""}`
+      : "";
+  }
+  updateCostEstimate(entry);
   renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
   drawPreview();
   saveDraft();
@@ -1045,9 +1103,14 @@ function setActiveZone(zoneId) {
   const shade = state.shades.find((s) => s.hex === zone.shadeHex) || state.shades[0];
   state.activeShade = shade;
 
+  const entry = catalogEntry(shade);
   activeSwatchEl.style.background = shade.hex;
-  activeShadeNameEl.textContent = shade.name;
+  activeShadeNameEl.textContent = entry.name || shade.name;
   activeShadeHexEl.textContent = shade.hex;
+  if (activeShadeBrandEl) {
+    activeShadeBrandEl.textContent = entry.brand ? `${entry.brand} — ${entry.collection || ""}` : "";
+  }
+  updateCostEstimate(entry);
 
   renderZoneTabs();
   renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
@@ -1518,11 +1581,7 @@ function loadLeads() {
 }
 
 function saveLeads() {
-  try {
-    localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(leads));
-  } catch (e) {
-    console.warn("Could not persist leads", e);
-  }
+  safeLsSet(LEADS_STORAGE_KEY, JSON.stringify(leads));
   updateLeadsCount();
 }
 
@@ -1531,8 +1590,57 @@ function updateLeadsCount() {
 }
 
 function getShadeNameForHex(hex) {
+  const catalog = findShadeInCatalog(hex);
+  if (catalog) return catalog.name;
   const found = state.shades.find((s) => s.hex.toLowerCase() === (hex || "").toLowerCase());
   return found ? found.name : "Custom";
+}
+
+function getShadeMetaForHex(hex) {
+  const catalog = findShadeInCatalog(hex);
+  if (catalog) return { name: catalog.name, brand: catalog.brand, collection: catalog.collection, hex };
+  const found = state.shades.find((s) => s.hex.toLowerCase() === (hex || "").toLowerCase());
+  return found ? { name: found.name, brand: found.brand || "", collection: "", hex } : { name: "Custom", brand: "", collection: "", hex };
+}
+
+function runShadeSearch(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    shadeSearchResults.innerHTML = "";
+    shadeSearchResults.classList.add("hidden");
+    return;
+  }
+  const catalog = SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES;
+  const results = catalog.filter((s) =>
+    s.name.toLowerCase().includes(q) ||
+    (s.brand || "").toLowerCase().includes(q) ||
+    (s.collection || "").toLowerCase().includes(q) ||
+    s.hex.toLowerCase().includes(q)
+  ).slice(0, 12);
+
+  shadeSearchResults.innerHTML = "";
+  if (!results.length) {
+    shadeSearchResults.classList.add("hidden");
+    return;
+  }
+  results.forEach((s) => {
+    const btn = document.createElement("button");
+    btn.className = "swatch";
+    if (s.hex === state.activeShade?.hex) btn.classList.add("active");
+    btn.style.background = s.hex;
+    btn.title = `${s.name} · ${s.brand} · ${s.hex}`;
+    btn.addEventListener("click", () => {
+      setActiveShade(s);
+      // also add to suggestions for quick re-access
+      if (!state.shades.find((x) => x.hex === s.hex)) {
+        state.shades.unshift(s);
+        state.shades = state.shades.slice(0, 6);
+      }
+      renderSwatches(suggestionsEl, state.shades, setActiveShade, s.hex);
+    });
+    shadeSearchResults.appendChild(btn);
+  });
+  shadeSearchResults.classList.remove("hidden");
 }
 
 function openContactModal() {
@@ -1540,10 +1648,11 @@ function openContactModal() {
   // populate shades summary
   leadShadesSummary.innerHTML = "";
   state.zones.forEach((zone) => {
-    const name = getShadeNameForHex(zone.shadeHex);
+    const meta = getShadeMetaForHex(zone.shadeHex);
     const row = document.createElement("span");
     row.className = "lead-shade";
-    row.innerHTML = `<span class="sw" style="background:${zone.shadeHex}"></span><span>${zone.label} — ${name} <span class="muted">${zone.shadeHex}</span></span>`;
+    const brandStr = meta.brand ? ` · ${meta.brand}` : "";
+    row.innerHTML = `<span class="sw" style="background:${zone.shadeHex}"></span><span>${zone.label} — ${meta.name}${brandStr} <span class="muted">${zone.shadeHex}</span></span>`;
     leadShadesSummary.appendChild(row);
   });
 
@@ -1595,12 +1704,11 @@ function captureLeadFromForm(e) {
   const phone = (leadPhoneInput.value || "").trim();
   if (!name || !phone) return;
 
-  // build shades payload from current zones
-  const shades = state.zones.map((z) => ({
-    wall: z.label,
-    hex: z.shadeHex,
-    name: getShadeNameForHex(z.shadeHex)
-  }));
+  // build shades payload from current zones (with full catalog metadata)
+  const shades = state.zones.map((z) => {
+    const meta = getShadeMetaForHex(z.shadeHex);
+    return { wall: z.label, hex: z.shadeHex, name: meta.name, brand: meta.brand, collection: meta.collection };
+  });
 
   // snapshot from the modal canvas (already rendered)
   const snapDataUrl = leadSnapshotCanvas.toDataURL("image/png");
@@ -1707,10 +1815,11 @@ function openLeadDetail(leadId) {
   `;
 
   (lead.shades || []).forEach((s) => {
+    const brandLine = s.brand ? `<span class="muted"> · ${s.brand}</span>` : "";
     html += `
       <div class="wall-row">
         <span class="sw" style="background:${s.hex}"></span>
-        <span class="wall-label">${s.wall} — ${s.name} <span class="muted">${s.hex}</span></span>
+        <span class="wall-label">${s.wall} — ${s.name}${brandLine} <span class="muted">${s.hex}</span></span>
       </div>
     `;
   });
@@ -1784,6 +1893,17 @@ function downscaleForDraft(img, maxWidth = 960) {
   return c.toDataURL("image/jpeg", 0.82); // smaller than png for storage
 }
 
+function safeLsSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    // Storage full — try to free space by removing the draft and retry once
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch { /* nothing */ }
+    try { localStorage.setItem(key, value); return true; } catch { return false; }
+  }
+}
+
 function saveDraft() {
   if (!state.originalImage || !state.zones.length) return;
   try {
@@ -1792,9 +1912,9 @@ function saveDraft() {
       zones: state.zones.map((z) => ({ label: z.label, shadeHex: z.shadeHex })),
       savedAt: Date.now()
     };
-    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
-  } catch (e) {
-    // storage full or private mode — ignore silently
+    safeLsSet(DRAFT_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore — private mode or storage unavailable
   }
 }
 
@@ -1847,9 +1967,63 @@ function loadDraft() {
 }
 
 function updateRestoreDraftUI() {
-  if (!restoreDraftBtn) return;
-  const shouldShow = !state.originalImage && hasDraft();
-  restoreDraftBtn.style.display = shouldShow ? "" : "none";
+  if (restoreDraftBtn) {
+    restoreDraftBtn.style.display = (!state.originalImage && hasDraft()) ? "" : "none";
+  }
+  if (clearSessionBtn) {
+    clearSessionBtn.style.display = state.originalImage ? "" : "none";
+  }
+}
+
+function clearSession() {
+  state.originalImage = null;
+  state.originalPixels = null;
+  state.imageRect = null;
+  state.shades = [];
+  state.activeShade = null;
+  state.compareShade = null;
+  state.zones = [];
+  state.activeZoneId = null;
+  state.nextZoneId = 1;
+  state.isBrushing = false;
+  state.compareSliderX = 0.5;
+  state.brushCursor = null;
+  state.mlMask = null;
+
+  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch { /* nothing */ }
+
+  // Reset canvas
+  previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+  compareCtx.clearRect(0, 0, compareCanvas.width, compareCanvas.height);
+  brushCursorCtx.clearRect(0, 0, brushCursorCanvas.width, brushCursorCanvas.height);
+  compareCanvas.classList.add("hidden");
+  compareHandle.classList.add("hidden");
+  brushCursorCanvas.classList.add("hidden");
+  canvasHint.classList.remove("hidden");
+
+  // Reset UI
+  setControlsEnabled(false);
+  suggestionsEl.innerHTML = "";
+  compareSuggestionsEl.innerHTML = "";
+  zoneTabsEl.innerHTML = "";
+  activeSwatchEl.style.background = "";
+  activeShadeNameEl.textContent = "No shade selected";
+  activeShadeHexEl.textContent = "-";
+  if (activeShadeBrandEl) activeShadeBrandEl.textContent = "";
+  if (costEstimateEl) costEstimateEl.classList.add("hidden");
+  if (shadeSearchResults) { shadeSearchResults.innerHTML = ""; shadeSearchResults.classList.add("hidden"); }
+  if (shadeSearchInput) shadeSearchInput.value = "";
+
+  beforeAfterToggle.checked = false;
+  compareToggle.checked = false;
+  brushMaskToggle.checked = false;
+  brushEraseToggle.checked = false;
+  pickWallToggle.checked = false;
+  canvasWrap.classList.remove("picking", "brushing");
+
+  setMlStatus("ML: loading model...", "");
+  updateMaskStatus();
+  updateRestoreDraftUI();
 }
 
 /* ===================== End Phase 2 helpers ===================== */
@@ -1964,18 +2138,26 @@ compareHandle.addEventListener("pointercancel", () => { isDraggingSlider = false
 
 exportBtn.addEventListener("click", exportPreview);
 
-// Phase 2 wiring
+// Startup
+loadShadeCatalog(); // non-blocking; catalog will be ready before any image is uploaded
 loadLeads();
 updateRestoreDraftUI();
 if (leadsBtn) leadsBtn.disabled = false;
 
 if (contactBtn) contactBtn.addEventListener("click", openContactModal);
 if (leadsBtn) leadsBtn.addEventListener("click", openLeadsModal);
-if (restoreDraftBtn) restoreDraftBtn.addEventListener("click", () => {
-  if (loadDraft()) {
-    // loadDraft will hide via its own update call at end
-  }
-});
+if (restoreDraftBtn) restoreDraftBtn.addEventListener("click", () => { loadDraft(); });
+if (clearSessionBtn) clearSessionBtn.addEventListener("click", clearSession);
+
+if (shadeSearchInput) {
+  shadeSearchInput.addEventListener("input", () => runShadeSearch(shadeSearchInput.value));
+  shadeSearchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      shadeSearchInput.value = "";
+      runShadeSearch("");
+    }
+  });
+}
 
 if (closeContactBtn) closeContactBtn.addEventListener("click", closeContactModal);
 if (cancelContactBtn) cancelContactBtn.addEventListener("click", closeContactModal);

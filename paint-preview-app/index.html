@@ -25,6 +25,7 @@
             <button id="contactBtn" class="button primary" disabled>Contact Dealer</button>
             <button id="leadsBtn" class="button ghost" disabled>Leads <span id="leadsCount">0</span></button>
             <button id="restoreDraftBtn" class="button ghost" style="display:none">Restore draft</button>
+            <button id="clearSessionBtn" class="button ghost" style="display:none">New session</button>
           </div>
           <input id="imageInput" type="file" accept="image/*" hidden />
         </div>
@@ -72,8 +73,12 @@
         <aside class="control-panel">
           <section>
             <h3>Suggested Shades</h3>
-            <p class="muted">Auto-picked from your image dominant color.</p>
+            <p class="muted">Auto-picked from your image. Search all brands below.</p>
             <div id="suggestions" class="swatch-grid"></div>
+            <div class="shade-search-wrap">
+              <input id="shadeSearch" type="search" placeholder="Search shades — e.g. Linen, Dulux, teal…" autocomplete="off" />
+            </div>
+            <div id="shadeSearchResults" class="swatch-grid shade-search-results hidden"></div>
           </section>
 
           <section>
@@ -83,7 +88,12 @@
               <div>
                 <p id="activeShadeName">No shade selected</p>
                 <p id="activeShadeHex" class="muted">-</p>
+                <p id="activeShadeBrand" class="muted tiny"></p>
               </div>
+            </div>
+            <div id="costEstimate" class="cost-estimate hidden">
+              <span id="costLitres"></span>
+              <span id="costTotal"></span>
             </div>
           </section>
 

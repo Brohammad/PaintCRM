@@ -58,12 +58,16 @@ Phase 1 - Decision Engine Hardening (Done)
 - Improve auto wall choosing quality
 - Keep one-screen flow usable on mobile and desktop
 
-Phase 2 - Conversion Layer (In progress)
+Phase 2 - Conversion Layer (Done)
 - Add Contact Dealer action
-- Capture lead details: name, phone, selected shades, preview snapshot
+- Capture lead details: name, phone, selected shades (with brand + catalog metadata), preview snapshot
 - Add simple local dealer inbox/list for captured leads
-- Add session save for draft previews
-- Lead package export (image + structured data) for dealer follow-up
+- Add session save for draft previews (auto-save + restore + new session)
+- Lead package export (PNG snapshot + JSON sidecar with brand + shade metadata)
+- Real shade catalog (63 shades: Asian Paints, Dulux, Berger, Nerolac)
+- Shade search across full catalog by name, brand, or color family
+- Basic cost estimator (litres + INR estimate for standard room, 2 coats)
+- localStorage safety guards (graceful fallback when storage full)
 
 Phase 3 - Pilot Validation (After conversion layer)
 - Test with 3 to 5 local dealers

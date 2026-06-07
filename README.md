@@ -38,14 +38,18 @@ Open [http://localhost:8080](http://localhost:8080). No install, no build.
 - **Compare drag slider** — drag a split-view handle to reveal any proportion of two shades side by side
 - **Share / Export** — native share sheet on supported devices, PNG download fallback
 
-### Phase 2 — Conversion Layer (in progress)
+### Phase 2 — Conversion Layer (done)
 
-- **Contact Dealer** — after finishing a preview, capture customer name, phone, optional email + notes, the chosen shade for each wall zone, and a live snapshot of the current preview
+- **Real shade catalog** — 63 curated shades across Asian Paints, Dulux, Berger, and Nerolac loaded from `shades.json`; suggestions are picked from this catalog matched to the room's dominant color
+- **Shade search** — type any shade name, brand, or color family in the search box to instantly filter the full catalog; click any result to apply it immediately
+- **Contact Dealer** — after finishing a preview, capture customer name, phone, optional email + notes, the chosen shade for each wall zone (with brand name), and a live snapshot of the current preview
 - **Local Leads Inbox** — all captured leads are persisted in the browser (no server required); view the full list, browse by customer, open detail view
-- **Lead detail view** — snapshot image, full customer info, exact per-wall shade breakdown (name + hex)
-- **Lead package export** — one click downloads the snapshot PNG + a structured `.json` sidecar (ISO timestamp, customer fields, shades per wall) — ready to email, print, or import into a real CRM
-- **Delete leads** — remove individual leads from the local inbox
-- **Session draft save / restore** — the current workspace (image + wall color choices) is automatically saved as you work; a "Restore draft" button appears on fresh loads so you can resume a customer session without re-uploading
+- **Lead detail view** — snapshot image, full customer info, exact per-wall shade breakdown (name + brand + hex)
+- **Lead package export** — one click downloads the snapshot PNG + a structured `.json` sidecar (ISO timestamp, customer fields, brand + shade per wall) — ready to email, print, or import into a real CRM
+- **Delete leads** — remove individual leads from the inbox
+- **Cost estimator** — as soon as a shade is selected, shows estimated litres and total cost for a standard room (40 sq m, 2 coats) based on the catalog price per litre
+- **Session draft save / restore** — the current workspace (image + wall color choices) is automatically saved as you work; "Restore draft" appears on fresh loads to resume without re-uploading; "New session" resets the canvas cleanly
+- **Storage safety** — graceful fallback when localStorage is full; no crashes
 
 ## User flow (demo script)
 
@@ -78,7 +82,7 @@ The E2E suite covers: image upload, brush paint, brush erase, compare mode, and 
 |-------|--------|-------------|
 | 0 | Done | Product contract — scope, flow, success metrics |
 | 1 | Done | Decision Engine — masking, recolor, compare, share |
-| 2 | In Progress | Conversion layer — Contact Dealer form, lead capture, local inbox, session drafts |
+| 2 | Done | Conversion layer — shade catalog, search, lead capture, inbox, cost estimator, session drafts |
 | 3 | Planned | Pilot validation — 3–5 dealers, real usage metrics |
 | 4 | Planned | Backend foundation — auth, lead APIs, shade catalog |
 | 5+ | Future | CRM Lite, quoting, inventory, AI recommendations |
