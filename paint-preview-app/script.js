@@ -124,6 +124,17 @@ const DRAFT_STORAGE_KEY = "paintcrm_draft_v1";
 let leads = [];
 let currentDetailLeadId = null;
 
+// Phase 3: pilot analytics + dealer settings
+const ANALYTICS_STORAGE_KEY = "paintcrm_analytics_v1";
+const DEALER_STORAGE_KEY = "paintcrm_dealer_v1";
+
+let analyticsEvents = [];
+let pilotSessionId = null;
+let pilotSessionStart = null;
+let pilotFirstShadeTs = null;
+let pilotFirstActionTs = null;
+let dealerSettings = { shopName: "", dealerName: "", phone: "" };
+
 async function loadShadeCatalog() {
   try {
     const res = await fetch("shades.json");
@@ -1085,6 +1096,7 @@ function setActiveShade(shade) {
   }
   updateCostEstimate(entry);
   renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
+  trackShadeSelected(entry); // Phase 3: track decision event
   drawPreview();
   saveDraft();
 }
@@ -1536,6 +1548,7 @@ function handleImageUpload(file) {
     const img = new Image();
     img.onload = () => {
       state.originalImage = img;
+      startPilotSession(); // Phase 3: begin a new pilot session
       initializeShadesFromImage();
       updateRestoreDraftUI();
     };
@@ -1546,6 +1559,7 @@ function handleImageUpload(file) {
 
 async function exportPreview() {
   if (!state.originalImage) return;
+  trackShareExport(); // Phase 3
   const dataUrl = previewCanvas.toDataURL("image/png");
 
   if (navigator.canShare) {
@@ -1587,6 +1601,8 @@ function saveLeads() {
 
 function updateLeadsCount() {
   if (leadsCountEl) leadsCountEl.textContent = String(leads.length);
+  const tabCount = document.getElementById("leadsTabCount");
+  if (tabCount) tabCount.textContent = leads.length ? ` (${leads.length})` : "";
 }
 
 function getShadeNameForHex(hex) {
@@ -1688,7 +1704,7 @@ function openContactModal() {
   leadNotesInput.value = "";
 
   contactModal.classList.remove("hidden");
-  // focus first field
+  trackContactOpened(); // Phase 3
   setTimeout(() => leadNameInput.focus(), 0);
 }
 
@@ -1726,9 +1742,9 @@ function captureLeadFromForm(e) {
 
   leads.unshift(lead); // newest first
   saveLeads();
+  trackContactSaved(lead.id); // Phase 3
   closeContactModal();
 
-  // friendly confirmation (non-blocking)
   showTransientToast(`Lead saved for ${name}. View in Leads inbox.`);
 }
 
@@ -1745,6 +1761,7 @@ function showTransientToast(msg) {
 }
 
 function openLeadsModal() {
+  switchLeadsTab("leads"); // Phase 3: always open on leads tab
   renderLeadsList();
   leadsModal.classList.remove("hidden");
 }
@@ -1860,6 +1877,7 @@ function exportCurrentLeadPackage() {
   const meta = {
     id: lead.id,
     capturedAt: new Date(lead.ts).toISOString(),
+    dealer: { shopName: dealerSettings.shopName || null, dealerName: dealerSettings.dealerName || null, phone: dealerSettings.phone || null },
     customer: { name: lead.name, phone: lead.phone, email: lead.email || null, notes: lead.notes || null },
     shades: lead.shades
   };
@@ -2026,6 +2044,258 @@ function clearSession() {
   updateRestoreDraftUI();
 }
 
+/* ===================== Phase 3: Pilot Validation Analytics ===================== */
+
+function generateEventId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function loadAnalytics() {
+  try {
+    const raw = localStorage.getItem(ANALYTICS_STORAGE_KEY);
+    analyticsEvents = raw ? JSON.parse(raw) : [];
+  } catch {
+    analyticsEvents = [];
+  }
+}
+
+function saveAnalytics() {
+  if (analyticsEvents.length > 600) analyticsEvents = analyticsEvents.slice(-600);
+  safeLsSet(ANALYTICS_STORAGE_KEY, JSON.stringify(analyticsEvents));
+}
+
+function trackEvent(type, data = {}) {
+  const evt = { id: generateEventId(), ts: Date.now(), type, sessionId: pilotSessionId || null, data };
+  analyticsEvents.push(evt);
+  saveAnalytics();
+}
+
+function startPilotSession() {
+  pilotSessionId = generateEventId();
+  pilotSessionStart = Date.now();
+  pilotFirstShadeTs = null;
+  pilotFirstActionTs = null;
+  trackEvent("session_start", { dealer: dealerSettings.shopName || "" });
+}
+
+function trackShadeSelected(shade) {
+  if (!pilotSessionId) return;
+  const isFirst = !pilotFirstShadeTs;
+  if (!pilotFirstShadeTs) pilotFirstShadeTs = Date.now();
+  const ttFirstShade = isFirst ? pilotFirstShadeTs - (pilotSessionStart || pilotFirstShadeTs) : null;
+  trackEvent("shade_selected", { hex: shade.hex, name: shade.name, brand: shade.brand || "", ttFirstShade });
+}
+
+function trackShareExport() {
+  if (!pilotSessionId) return;
+  const isFirst = !pilotFirstActionTs;
+  if (!pilotFirstActionTs) pilotFirstActionTs = Date.now();
+  const ttAction = isFirst ? pilotFirstActionTs - (pilotSessionStart || pilotFirstActionTs) : null;
+  trackEvent("share_exported", { ttAction });
+}
+
+function trackContactOpened() {
+  if (!pilotSessionId) return;
+  trackEvent("contact_opened", {});
+}
+
+function trackContactSaved(leadId) {
+  if (!pilotSessionId) return;
+  const isFirst = !pilotFirstActionTs;
+  if (!pilotFirstActionTs) pilotFirstActionTs = Date.now();
+  const ttAction = isFirst ? pilotFirstActionTs - (pilotSessionStart || pilotFirstActionTs) : null;
+  trackEvent("contact_saved", { leadId, ttAction });
+}
+
+function renderAnalytics() {
+  const panel = document.getElementById("analyticsPanel");
+  if (!panel) return;
+
+  const now = Date.now();
+  const MS_30D = 30 * 24 * 60 * 60 * 1000;
+  const recent = analyticsEvents.filter((e) => now - e.ts < MS_30D);
+
+  const startEvents = recent.filter((e) => e.type === "session_start");
+  const totalSessions = startEvents.length;
+
+  // avg time to first shade pick (ms → seconds)
+  const firstShadeEvents = recent.filter((e) => e.type === "shade_selected" && e.data.ttFirstShade != null);
+  const avgShadeMs = firstShadeEvents.length
+    ? firstShadeEvents.reduce((s, e) => s + e.data.ttFirstShade, 0) / firstShadeEvents.length
+    : 0;
+  const avgShadeSec = Math.round(avgShadeMs / 1000);
+
+  // sessions that had a contact_saved event
+  const contactSessionIds = new Set(recent.filter((e) => e.type === "contact_saved").map((e) => e.sessionId));
+  const contactCount = contactSessionIds.size;
+  const contactRate = totalSessions ? Math.round((contactCount / totalSessions) * 100) : 0;
+
+  // sessions that had a share_exported event
+  const shareSessionIds = new Set(recent.filter((e) => e.type === "share_exported").map((e) => e.sessionId));
+  const shareCount = shareSessionIds.size;
+  const shareRate = totalSessions ? Math.round((shareCount / totalSessions) * 100) : 0;
+
+  // sessions per day, last 7 days
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const dayEnd = d.getTime() + 86400000;
+    const count = startEvents.filter((e) => e.ts >= d.getTime() && e.ts < dayEnd).length;
+    days.push({ label: dayNames[d.getDay()], count, isToday: i === 0 });
+  }
+  const maxDay = Math.max(1, ...days.map((d) => d.count));
+
+  const emptyMsg = totalSessions === 0
+    ? `<p class="analytics-empty">No pilot sessions yet.<br>Analytics start when a customer uploads their first room photo.</p>`
+    : "";
+
+  panel.innerHTML = `
+    <div class="analytics-grid">
+      <div class="analytics-card">
+        <div class="a-label">Sessions (30d)</div>
+        <div class="a-value">${totalSessions}</div>
+        <div class="a-sub">unique preview sessions</div>
+      </div>
+      <div class="analytics-card">
+        <div class="a-label">Avg. decision time</div>
+        <div class="a-value">${avgShadeSec > 0 ? avgShadeSec + "s" : "—"}</div>
+        <div class="a-sub">to first shade pick</div>
+      </div>
+      <div class="analytics-card">
+        <div class="a-label">Contact rate</div>
+        <div class="a-value">${totalSessions ? contactRate + "%" : "—"}</div>
+        <div class="a-sub">${contactCount} of ${totalSessions} sessions</div>
+      </div>
+      <div class="analytics-card">
+        <div class="a-label">Share rate</div>
+        <div class="a-value">${totalSessions ? shareRate + "%" : "—"}</div>
+        <div class="a-sub">${shareCount} of ${totalSessions} sessions</div>
+      </div>
+    </div>
+    <div class="analytics-bars">
+      <h4>Sessions — last 7 days</h4>
+      ${days.map((d) => `
+        <div class="bar-row">
+          <span class="day-label" style="${d.isToday ? "color:var(--accent);font-weight:600" : ""}">${d.label}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round((d.count / maxDay) * 100)}%"></div></div>
+          <span class="bar-count">${d.count || ""}</span>
+        </div>
+      `).join("")}
+    </div>
+    ${emptyMsg}
+    <p class="muted tiny" style="margin-top:12px;">Data is stored locally on this device. Export via Settings → Download Analytics JSON.</p>
+  `;
+}
+
+function exportAnalyticsJson() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    dealer: dealerSettings,
+    totalEvents: analyticsEvents.length,
+    events: analyticsEvents
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `paintcrm-pilot-analytics-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function clearAnalyticsData() {
+  if (!confirm("Clear all pilot analytics data? This cannot be undone.")) return;
+  analyticsEvents = [];
+  try { localStorage.removeItem(ANALYTICS_STORAGE_KEY); } catch { /* nothing */ }
+  showTransientToast("Analytics data cleared.");
+}
+
+/* ---- Dealer Settings (Phase 3) ---- */
+
+function loadDealerSettings() {
+  try {
+    const raw = localStorage.getItem(DEALER_STORAGE_KEY);
+    dealerSettings = raw ? JSON.parse(raw) : { shopName: "", dealerName: "", phone: "" };
+  } catch {
+    dealerSettings = { shopName: "", dealerName: "", phone: "" };
+  }
+  applyDealerBranding();
+}
+
+function saveDealerSettings(settings) {
+  dealerSettings = settings;
+  safeLsSet(DEALER_STORAGE_KEY, JSON.stringify(settings));
+  applyDealerBranding();
+}
+
+function applyDealerBranding() {
+  const el = document.getElementById("dealerBranding");
+  if (!el) return;
+  const parts = [dealerSettings.shopName, dealerSettings.dealerName].filter(Boolean);
+  if (parts.length) {
+    el.textContent = "\uD83D\uDCCD " + parts.join(" \u00B7 ");
+    el.classList.remove("hidden");
+  } else {
+    el.classList.add("hidden");
+  }
+}
+
+function openSettingsModal() {
+  const modal = document.getElementById("settingsModal");
+  if (!modal) return;
+  const shopInput = document.getElementById("settingShopName");
+  const dealerInput = document.getElementById("settingDealerName");
+  const phoneInput = document.getElementById("settingDealerPhone");
+  if (shopInput) shopInput.value = dealerSettings.shopName || "";
+  if (dealerInput) dealerInput.value = dealerSettings.dealerName || "";
+  if (phoneInput) phoneInput.value = dealerSettings.phone || "";
+  modal.classList.remove("hidden");
+}
+
+function closeSettingsModal() {
+  const modal = document.getElementById("settingsModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function handleSettingsSubmit(e) {
+  e.preventDefault();
+  const shopName = (document.getElementById("settingShopName")?.value || "").trim();
+  const dealerName = (document.getElementById("settingDealerName")?.value || "").trim();
+  const phone = (document.getElementById("settingDealerPhone")?.value || "").trim();
+  saveDealerSettings({ shopName, dealerName, phone });
+  closeSettingsModal();
+  showTransientToast("Settings saved.");
+}
+
+/* ---- Leads modal tab switching (Phase 3) ---- */
+
+function switchLeadsTab(tab) {
+  const leadsPanel = document.getElementById("leadsList");
+  const analyticsPanel = document.getElementById("analyticsPanel");
+  const leadsTabBtn = document.getElementById("leadsTabBtn");
+  const analyticsTabBtn = document.getElementById("analyticsTabBtn");
+  const actionsRow = document.getElementById("leadsModalActions");
+
+  if (tab === "analytics") {
+    if (leadsPanel) leadsPanel.classList.add("hidden");
+    if (analyticsPanel) { analyticsPanel.classList.remove("hidden"); renderAnalytics(); }
+    if (leadsTabBtn) leadsTabBtn.classList.remove("active");
+    if (analyticsTabBtn) analyticsTabBtn.classList.add("active");
+    if (actionsRow) actionsRow.style.display = "none";
+  } else {
+    if (leadsPanel) leadsPanel.classList.remove("hidden");
+    if (analyticsPanel) analyticsPanel.classList.add("hidden");
+    if (leadsTabBtn) leadsTabBtn.classList.add("active");
+    if (analyticsTabBtn) analyticsTabBtn.classList.remove("active");
+    if (actionsRow) actionsRow.style.display = "";
+  }
+}
+
+/* ===================== End Phase 3 helpers ===================== */
+
 /* ===================== End Phase 2 helpers ===================== */
 
 imageInput.addEventListener("change", (event) => {
@@ -2141,6 +2411,8 @@ exportBtn.addEventListener("click", exportPreview);
 // Startup
 loadShadeCatalog(); // non-blocking; catalog will be ready before any image is uploaded
 loadLeads();
+loadAnalytics();       // Phase 3
+loadDealerSettings();  // Phase 3
 updateRestoreDraftUI();
 if (leadsBtn) leadsBtn.disabled = false;
 
@@ -2171,8 +2443,30 @@ if (closeDetailBtn) closeDetailBtn.addEventListener("click", closeLeadDetail);
 if (deleteLeadBtn) deleteLeadBtn.addEventListener("click", deleteCurrentLead);
 if (exportLeadBtn) exportLeadBtn.addEventListener("click", exportCurrentLeadPackage);
 
+// Phase 3: leads modal tab buttons
+const leadsTabBtn = document.getElementById("leadsTabBtn");
+const analyticsTabBtn = document.getElementById("analyticsTabBtn");
+if (leadsTabBtn) leadsTabBtn.addEventListener("click", () => switchLeadsTab("leads"));
+if (analyticsTabBtn) analyticsTabBtn.addEventListener("click", () => switchLeadsTab("analytics"));
+
+// Phase 3: settings modal
+const settingsBtn = document.getElementById("settingsBtn");
+const closeSettingsBtnEl = document.getElementById("closeSettingsBtn");
+const cancelSettingsBtnEl = document.getElementById("cancelSettingsBtn");
+const settingsFormEl = document.getElementById("settingsForm");
+const settingsModal = document.getElementById("settingsModal");
+const exportAnalyticsBtnEl = document.getElementById("exportAnalyticsBtn");
+const clearAnalyticsBtnEl = document.getElementById("clearAnalyticsBtn");
+
+if (settingsBtn) settingsBtn.addEventListener("click", openSettingsModal);
+if (closeSettingsBtnEl) closeSettingsBtnEl.addEventListener("click", closeSettingsModal);
+if (cancelSettingsBtnEl) cancelSettingsBtnEl.addEventListener("click", closeSettingsModal);
+if (settingsFormEl) settingsFormEl.addEventListener("submit", handleSettingsSubmit);
+if (exportAnalyticsBtnEl) exportAnalyticsBtnEl.addEventListener("click", exportAnalyticsJson);
+if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnalyticsData);
+
 // Backdrop click to close
-[contactModal, leadsModal, leadDetailModal].forEach((m) => {
+[contactModal, leadsModal, leadDetailModal, settingsModal].forEach((m) => {
   if (!m) return;
   m.addEventListener("click", (e) => {
     if (e.target === m) {
@@ -2195,6 +2489,10 @@ document.addEventListener("keydown", (e) => {
     }
     if (contactModal && !contactModal.classList.contains("hidden")) {
       closeContactModal();
+      return;
+    }
+    if (settingsModal && !settingsModal.classList.contains("hidden")) {
+      closeSettingsModal();
       return;
     }
   }

@@ -69,13 +69,21 @@ Phase 2 - Conversion Layer (Done)
 - Basic cost estimator (litres + INR estimate for standard room, 2 coats)
 - localStorage safety guards (graceful fallback when storage full)
 
-Phase 3 - Pilot Validation (After conversion layer)
+Phase 3 - Pilot Validation (IN PROGRESS — started Jun 7 2026)
 - Test with 3 to 5 local dealers
 - Measure:
   - Time to customer decision
   - Share/contact action rate
   - Dealer feedback on close-rate impact
 - Exit criteria: evidence of repeated real usage
+- Phase 3 pilot infra built:
+  - Session analytics engine (localStorage) tracking: session_start, shade_selected, share_exported, contact_opened, contact_saved
+  - Pilot Analytics dashboard in Leads modal (Leads / Analytics tabs)
+  - Metrics shown: sessions (30d), avg decision time, contact rate, share rate, 7-day bar chart
+  - Analytics export: download JSON from Settings for pilot review
+  - Dealer branding: shop name + dealer name shown in hero header, included in lead exports
+  - Settings modal: configure dealer name/shop/phone, export or clear analytics
+  - Dealer info embedded in all exported lead JSON packages
 
 Phase 4 - Backend Foundation
 - Basic auth and tenant model

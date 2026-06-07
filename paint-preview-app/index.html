@@ -15,8 +15,9 @@
         <div class="hero-copy">
           <p class="eyebrow">Paint Decision Engine</p>
           <h1>Upload a room. Test colors. Decide fast.</h1>
+          <p id="dealerBranding" class="dealer-brand hidden"></p>
           <p>
-            This V1 is optimized for in-store demos: fast image upload,
+            Optimized for in-store demos: fast image upload,
             instant shade preview, compare mode, and Contact Dealer capture for real leads.
           </p>
           <div class="actions-row">
@@ -24,6 +25,7 @@
             <button id="exportBtn" class="button ghost" disabled>Share / Export</button>
             <button id="contactBtn" class="button primary" disabled>Contact Dealer</button>
             <button id="leadsBtn" class="button ghost" disabled>Leads <span id="leadsCount">0</span></button>
+            <button id="settingsBtn" class="button ghost">Settings</button>
             <button id="restoreDraftBtn" class="button ghost" style="display:none">Restore draft</button>
             <button id="clearSessionBtn" class="button ghost" style="display:none">New session</button>
           </div>
@@ -174,6 +176,49 @@
       </section>
     </main>
 
+    <!-- Phase 3: Dealer Settings modal -->
+    <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-content">
+        <header class="modal-header">
+          <h3 id="settingsTitle">Dealer Settings</h3>
+          <button id="closeSettingsBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <form id="settingsForm" autocomplete="off">
+          <p class="muted" style="font-size:0.85rem;margin-bottom:14px;">Personalise this app for your shop. These details appear in the header and are saved locally on this device.</p>
+          <div class="form-grid">
+            <label class="field full">
+              <span>Shop / Dealer name</span>
+              <input id="settingShopName" type="text" placeholder="e.g. Kerala Paints, Kochi" />
+            </label>
+            <label class="field">
+              <span>Your name</span>
+              <input id="settingDealerName" type="text" placeholder="e.g. Ravi Kumar" />
+            </label>
+            <label class="field">
+              <span>Contact phone (for lead exports)</span>
+              <input id="settingDealerPhone" type="tel" placeholder="e.g. +91 98765 43210" />
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="cancelSettingsBtn" class="button ghost">Cancel</button>
+            <button type="submit" class="button primary">Save Settings</button>
+          </div>
+        </form>
+
+        <hr style="margin:20px 0;border:none;border-top:1px solid var(--border);" />
+
+        <div>
+          <h4 style="font-size:0.82rem;margin:0 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Pilot Analytics Export</h4>
+          <p class="muted tiny" style="margin-bottom:12px;">Download all session event data for pilot review with your team.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="exportAnalyticsBtn" class="button ghost">Download Analytics JSON</button>
+            <button id="clearAnalyticsBtn" class="button tiny ghost">Clear analytics</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Phase 2: Conversion modals (local only, no backend) -->
     <div id="contactModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="contactTitle">
       <div class="modal-content">
@@ -223,15 +268,24 @@
     <div id="leadsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="leadsTitle">
       <div class="modal-content wide">
         <header class="modal-header">
-          <h3 id="leadsTitle">Leads Inbox <span class="muted">(local to this browser)</span></h3>
+          <h3 id="leadsTitle">Inbox</h3>
           <button id="closeLeadsBtn" class="button tiny ghost" aria-label="Close">Close</button>
         </header>
+
+        <div class="modal-tabs">
+          <button class="modal-tab active" id="leadsTabBtn">Leads <span id="leadsTabCount" class="muted"></span></button>
+          <button class="modal-tab" id="analyticsTabBtn">Pilot Analytics</button>
+        </div>
 
         <div id="leadsList" class="leads-list">
           <!-- populated by JS: lead cards -->
         </div>
 
-        <div class="modal-actions">
+        <div id="analyticsPanel" class="analytics-panel hidden">
+          <!-- populated by JS -->
+        </div>
+
+        <div class="modal-actions" id="leadsModalActions">
           <button id="clearAllLeadsBtn" class="button tiny ghost">Clear all leads</button>
           <button id="closeLeads2Btn" class="button ghost">Done</button>
         </div>
