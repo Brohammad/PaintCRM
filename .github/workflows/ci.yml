@@ -33,7 +33,7 @@ jobs:
       
       - name: Run ESLint
         working-directory: ./server
-        run: npm run lint || true
+        run: npm run lint
 
   test:
     name: Test
@@ -101,11 +101,10 @@ jobs:
         uses: docker/setup-buildx-action@v3
       
       - name: Build Docker image
-        working-directory: ./server
         run: |
-          docker build -t paintcrm:${{ github.sha }} .
+          docker build -f server/Dockerfile -t paintcrm:${{ github.sha }} .
           docker tag paintcrm:${{ github.sha }} paintcrm:latest
-      
+
       - name: Test Docker image
         run: |
           docker run --rm paintcrm:${{ github.sha }} node --version

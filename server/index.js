@@ -1,6 +1,19 @@
 // Load environment variables
 require('dotenv').config();
 
+// Refuse to start in production without a real JWT secret
+if (process.env.NODE_ENV === 'production') {
+  const secret = process.env.JWT_SECRET || '';
+  if (!secret || secret === 'dev_secret_change_me' || secret === 'change_this_in_production') {
+    console.error('FATAL: JWT_SECRET must be set to a secure value in production. Refusing to start.');
+    process.exit(1);
+  }
+  if (secret.length < 32) {
+    console.error('FATAL: JWT_SECRET must be at least 32 characters in production. Refusing to start.');
+    process.exit(1);
+  }
+}
+
 const app = require('./app');
 const { closePool } = require('./lib/db');
 

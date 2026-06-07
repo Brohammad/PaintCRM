@@ -3,24 +3,27 @@ version: '3.8'
 services:
   app:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     ports:
       - "3001:3001"
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/paintcrm
-      - JWT_SECRET=${JWT_SECRET:-change_this_in_production}
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/paintcrm
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
+      - ENABLE_RATE_LIMITING=${ENABLE_RATE_LIMITING:-true}
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - ./logs:/app/logs
+      - ./logs:/app/server/logs
     restart: unless-stopped
     networks:
       - paintcrm
@@ -29,11 +32,10 @@ services:
     image: postgres:16-alpine
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=paintcrm
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./server/migrations:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
     healthcheck:
@@ -77,7 +79,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards

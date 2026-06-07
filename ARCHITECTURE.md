@@ -86,7 +86,7 @@ The system is intentionally **offline-first**. A dealer should be able to run a 
 │                                                         │
 │   Static: serves paint-preview-app/ (same port)         │
 │                                                         │
-│   SQLite DB: tenants │ leads │ shades │ events          │
+│   PostgreSQL: tenants │ leads │ shades │ events          │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -109,7 +109,8 @@ PaintCRM/
 │   ├── index.js                # Server entry point with graceful shutdown
 │   ├── app.js                  # Express app factory with all middleware
 │   ├── lib/
-│   │   └── db.js               # PostgreSQL connection pooling
+│   │   ├── db.js               # PostgreSQL connection pooling + query instrumentation
+│   │   └── metrics.js          # Shared Prometheus registry and custom metrics
 │   ├── middleware/
 │   │   └── auth.js             # JWT verification with DB check
 │   ├── routes/
@@ -124,10 +125,13 @@ PaintCRM/
 │   │   ├── 003_create_leads.js
 │   │   ├── 004_create_events.js
 │   │   └── 005_seed_shades.js
-│   ├── tests/                  # Jest test suite
+│   ├── tests/                  # Jest test suite (setupFilesAfterEnv: setup.js)
 │   │   ├── setup.js
 │   │   ├── auth.test.js
-│   │   └── leads.test.js
+│   │   ├── leads.test.js
+│   │   ├── events.test.js
+│   │   ├── shades.test.js
+│   │   └── dealer.test.js
 │   ├── public/
 │   │   └── login.html          # Standalone auth page
 │   ├── Dockerfile              # Multi-stage production build
@@ -491,7 +495,7 @@ The server listens on `PORT` (default 3001). Serving the frontend from the same 
 **Registration:**
 1. Validate `shopName`, `email`, `password` (≥6 chars)
 2. Check `tenants` table for email uniqueness
-3. `bcrypt.hashSync(password, 10)` — 10 salt rounds (~100ms on modern hardware)
+3. `bcrypt.hashSync(password, 12)` — 12 salt rounds (~200ms on modern hardware)
 4. Insert tenant row with `uuid()` primary key
 5. Sign JWT: `{ id, email, shopName }`, 30-day TTL
 6. Return `{ token, tenant }`
@@ -680,13 +684,13 @@ first_shade AS (
   WHERE tenant_id=? AND event_type='shade_selected' GROUP BY session_id
 )
 SELECT AVG(
-  CAST((julianday(fs.shade_ts) - julianday(ss.ts)) * 86400000 AS INTEGER)
+  EXTRACT(EPOCH FROM (fs.shade_ts - ss.ts)) * 1000
 ) as avg_ms
 FROM session_start ss JOIN first_shade fs ON ss.session_id = fs.session_id
 WHERE ss.ts >= datetime('now', '-30 days');
 ```
 
-SQLite's `julianday()` converts ISO timestamps to floating-point days; multiplying by 86400000 converts to milliseconds.
+PostgreSQL's `EXTRACT(EPOCH FROM interval)` returns seconds; multiplying by 1000 converts to milliseconds.
 
 ---
 
@@ -942,8 +946,8 @@ Intersection is preferred: DeepLab's "wall" semantic label is precise, and the h
 | `localStorage` | `paintcrm_analytics_v1` | JSON array of events | 600-event cap | Oldest events dropped |
 | `localStorage` | `paintcrm_dealer_v1` | `{shopName, dealerName, phone}` | ~100 bytes | Settings form |
 | `localStorage` | `paintcrm_api_token_v1` | JWT string | ~200 bytes | Logout / expired |
-| Server — SQLite | `leads` table | Full lead rows + base64 snapshot | Disk | Manual delete |
-| Server — SQLite | `events` table | Funnel events (append-only) | Disk | No eviction yet |
+| Server — PostgreSQL | `leads` table | Full lead rows + base64 snapshot | Disk | Manual delete |
+| Server — PostgreSQL | `events` table | Funnel events (append-only) | Disk | No eviction yet |
 
 **Graceful degradation sequence:**
 1. No server: app works fully via localStorage alone.
@@ -967,7 +971,7 @@ Intersection is preferred: DeepLab's "wall" semantic label is precise, and the h
 | CORS | Configurable via `ALLOWED_ORIGINS` env var; defaults to permissive only in development |
 | Rate limiting | `express-rate-limit`: 100 req/15min per IP; auth endpoints stricter: 10 req/hour |
 | Security headers | Helmet.js: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
-| Input validation | Zod schemas for request validation; eventType whitelisted against `Set` |
+| Input validation | Manual field validation in each route; `eventType` whitelisted against a `Set` |
 | XSS protection | CSP directives restrict script sources; user content (snapshots) stored as base64, not rendered as HTML |
 | Logging | Pino structured logging with automatic PII redaction (passwords, tokens) |
 | Container security | Multi-stage Docker build; runs as non-root user (nodejs:1001) |
@@ -1031,7 +1035,7 @@ Intersection is preferred: DeepLab's "wall" semantic label is precise, and the h
 
 ### Backend
 
-All SQLite operations use prepared statements executed synchronously on the main thread (Node's event loop is not blocked because better-sqlite3's synchronous driver is very fast for single-writer workloads). Typical response times:
+All PostgreSQL queries use parameterized statements via `pg` pool. Typical response times:
 
 | Route | Typical latency |
 |-------|----------------|
@@ -1151,11 +1155,11 @@ Pipeline Stages:
 The current architecture is intentionally single-server, single-DB. The scaling path follows the phase gates in the product plan:
 
 ```
-Phase 4 (now): SQLite on a single VPS
+Phase 4 (now): PostgreSQL on a single VPS / Docker host
        │  when: > 500 dealers, > 1M events
        ▼
 Phase 5: Migrate to PostgreSQL
-  - same SQL syntax; change `better-sqlite3` import to `pg` pool
+  - add read replicas; route SELECT queries to replica pool
   - add connection pooling (pg-pool)
   - move snapshot storage to S3 / object storage (strip base64 from DB)
        │  when: multi-region or > 50k req/day
@@ -1274,8 +1278,8 @@ export default function () {
 | 8 | Future | Contractor assignment, customer-facing app, marketplace mechanics |
 
 **Phase 4 Enterprise Hardening (completed):**
-- Database: SQLite → PostgreSQL with migrations, connection pooling, GIN indexes
-- Security: Added Helmet, rate limiting, improved bcrypt rounds (10→12)
+- Database: PostgreSQL with migrations (node-pg-migrate), connection pooling, GIN indexes
+- Security: Helmet, rate limiting (Redis-backed when REDIS_URL set), bcrypt 12 rounds, JWT startup guard
 - Observability: Prometheus metrics, Grafana dashboards, structured logging (Pino)
 - DevOps: Docker multi-stage builds, GitHub Actions CI/CD, vulnerability scanning
 - Testing: Jest test suite with 70% coverage threshold, PostgreSQL test database

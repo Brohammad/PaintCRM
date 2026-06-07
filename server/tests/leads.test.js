@@ -3,7 +3,6 @@ const app = require('../app');
 
 describe('Leads API', () => {
   let token;
-  let tenantId;
 
   beforeEach(async () => {
     await global.cleanDatabase();
@@ -17,7 +16,6 @@ describe('Leads API', () => {
       });
     
     token = res.body.token;
-    tenantId = res.body.tenant.id;
   });
 
   describe('POST /api/leads', () => {

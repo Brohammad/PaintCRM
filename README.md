@@ -7,7 +7,7 @@ A paint decision engine that helps customers choose a wall color confidently in 
 | Path | Description |
 |------|-------------|
 | `paint-preview-app/` | Main app — static HTML/CSS/JS, runs in any browser with no build step |
-| `server/` | Phase 4 backend — Node.js + Express + SQLite, serves the frontend on one port |
+| `server/` | Phase 4 backend — Node.js + Express + PostgreSQL, serves the frontend on one port |
 | `paint-preview-app/react-canvas-component/` | Reusable React/Next.js component extracting the same canvas logic |
 | `test-scripts/` | Playwright E2E tests and backend smoke test scaffolding |
 | `master-plan.txt` | Phase roadmap from Decision Engine through CRM platform |
@@ -78,7 +78,7 @@ Open [http://localhost:8080](http://localhost:8080). Everything works offline vi
 
 ### Phase 4 — Backend Foundation (in progress)
 
-A full Node.js + Express + SQLite backend in `server/` with:
+A full Node.js + Express + PostgreSQL backend in `server/` with:
 
 | Endpoint | What it does |
 |----------|-------------|
