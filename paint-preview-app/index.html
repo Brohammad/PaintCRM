@@ -216,6 +216,49 @@
             <button id="clearAnalyticsBtn" class="button tiny ghost">Clear analytics</button>
           </div>
         </div>
+
+        <hr style="margin:20px 0;border:none;border-top:1px solid var(--border);" />
+
+        <!-- Phase 4: Server Sync -->
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <h4 style="font-size:0.82rem;margin:0;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Server Sync</h4>
+            <span id="serverSyncStatus" class="sync-status">Not connected</span>
+          </div>
+          <p class="muted tiny" style="margin-bottom:14px;">Sign in to sync leads and analytics to the PaintCRM backend. Works offline without an account.</p>
+
+          <!-- Logged-in state -->
+          <div id="serverLoggedInSection" class="hidden">
+            <p class="muted tiny" style="margin-bottom:10px;">Signed in as <strong id="serverTenantName"></strong></p>
+            <button type="button" id="serverLogoutBtn" class="button tiny ghost">Sign Out</button>
+          </div>
+
+          <!-- Login / register form -->
+          <div id="serverLoginSection">
+            <div class="modal-tabs" style="margin-bottom:14px;">
+              <button type="button" class="modal-tab active" id="authTabLogin">Sign In</button>
+              <button type="button" class="modal-tab" id="authTabRegister">Create Account</button>
+            </div>
+
+            <div id="registerOnlyFields" class="hidden">
+              <label class="field full" style="margin-bottom:10px;">
+                <span>Shop name</span>
+                <input id="serverShopName" type="text" placeholder="e.g. Kerala Paints, Kochi" autocomplete="organization" />
+              </label>
+            </div>
+
+            <label class="field full" style="margin-bottom:10px;">
+              <span>Email</span>
+              <input id="serverEmail" type="email" placeholder="dealer@shop.com" autocomplete="email" />
+            </label>
+            <label class="field full" style="margin-bottom:10px;">
+              <span>Password</span>
+              <input id="serverPassword" type="password" placeholder="min 6 characters" autocomplete="current-password" />
+            </label>
+            <p id="serverAuthError" class="muted tiny" style="color:#c0392b;margin-bottom:8px;min-height:16px;"></p>
+            <button type="button" id="serverAuthBtn" class="button primary">Sign In</button>
+          </div>
+        </div>
       </div>
     </div>
 

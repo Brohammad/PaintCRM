@@ -1,28 +1,46 @@
 # Paint Intelligence Platform
 
-A paint decision engine that helps customers choose a wall color confidently in under 60 seconds. Built for in-store dealer demos — upload a room photo, preview shades live on the walls, compare side by side, capture a lead, and export a package for dealer follow-up.
+A paint decision engine that helps customers choose a wall color confidently in under 60 seconds. Built for in-store dealer demos — upload a room photo, preview shades live on the walls, compare side by side, capture a lead, and sync everything to a real backend.
 
 ## What's in this repo
 
 | Path | Description |
 |------|-------------|
 | `paint-preview-app/` | Main app — static HTML/CSS/JS, runs in any browser with no build step |
+| `server/` | Phase 4 backend — Node.js + Express + SQLite, serves the frontend on one port |
 | `paint-preview-app/react-canvas-component/` | Reusable React/Next.js component extracting the same canvas logic |
 | `test-scripts/` | Playwright E2E tests and backend smoke test scaffolding |
 | `master-plan.txt` | Phase roadmap from Decision Engine through CRM platform |
 
-## Running locally
+---
+
+## Quick start
+
+### Option A — With backend (Phase 4, recommended)
+
+```bash
+cd server
+npm install
+npm start
+# → http://localhost:3001
+```
+
+The Express server serves the frontend **and** the API on a single port. Open [http://localhost:3001](http://localhost:3001) and use **Settings → Server Sync** to create an account.
+
+### Option B — Standalone (no server)
 
 ```bash
 cd paint-preview-app
 python3 -m http.server 8080
 ```
 
-Open [http://localhost:8080](http://localhost:8080). No install, no build.
+Open [http://localhost:8080](http://localhost:8080). Everything works offline via `localStorage` — no account needed.
+
+---
 
 ## Features
 
-### Phase 1 — Decision Engine (shipped)
+### Phase 1 — Decision Engine (done)
 
 - **Room photo upload** — works from file or camera roll on mobile
 - **Shade suggestions** — top 5 shades derived from the dominant room color
@@ -40,52 +58,105 @@ Open [http://localhost:8080](http://localhost:8080). No install, no build.
 
 ### Phase 2 — Conversion Layer (done)
 
-- **Real shade catalog** — 63 curated shades across Asian Paints, Dulux, Berger, and Nerolac loaded from `shades.json`; suggestions are picked from this catalog matched to the room's dominant color
-- **Shade search** — type any shade name, brand, or color family in the search box to instantly filter the full catalog; click any result to apply it immediately
-- **Contact Dealer** — after finishing a preview, capture customer name, phone, optional email + notes, the chosen shade for each wall zone (with brand name), and a live snapshot of the current preview
-- **Local Leads Inbox** — all captured leads are persisted in the browser (no server required); view the full list, browse by customer, open detail view
-- **Lead detail view** — snapshot image, full customer info, exact per-wall shade breakdown (name + brand + hex)
-- **Lead package export** — one click downloads the snapshot PNG + a structured `.json` sidecar (ISO timestamp, customer fields, brand + shade per wall) — ready to email, print, or import into a real CRM
-- **Delete leads** — remove individual leads from the inbox
-- **Cost estimator** — as soon as a shade is selected, shows estimated litres and total cost for a standard room (40 sq m, 2 coats) based on the catalog price per litre
-- **Session draft save / restore** — the current workspace (image + wall color choices) is automatically saved as you work; "Restore draft" appears on fresh loads to resume without re-uploading; "New session" resets the canvas cleanly
-- **Storage safety** — graceful fallback when localStorage is full; no crashes
+- **Real shade catalog** — 63 curated shades across Asian Paints, Dulux, Berger, and Nerolac loaded from `shades.json`
+- **Shade search** — type any shade name, brand, or color family to instantly filter the catalog
+- **Contact Dealer** — capture customer name, phone, email, notes, per-wall shade breakdown, and a live preview snapshot
+- **Local Leads Inbox** — leads persisted in the browser; list, detail view, delete
+- **Lead package export** — downloads snapshot PNG + structured `.json` sidecar (brand + shade per wall, dealer info)
+- **Cost estimator** — estimates litres and INR cost for a standard room (40 sq m, 2 coats) on shade selection
+- **Session draft save / restore** — workspace auto-saved; "Restore draft" lets users resume without re-uploading
+- **Storage safety** — graceful fallback when localStorage is full
 
-### Phase 3 — Pilot Validation (in progress)
+### Phase 3 — Pilot Validation (done)
 
-- **Session analytics engine** — every customer interaction is tracked in localStorage: `session_start` (on image upload), `shade_selected` (with time-to-first-pick), `share_exported`, `contact_opened`, `contact_saved` (with time-to-action); up to 600 events retained
-- **Pilot Analytics dashboard** — second tab inside the Leads modal; shows four KPI cards (sessions in last 30 days, average decision time, contact rate %, share rate %) and a 7-day session bar chart — no server needed
-- **Dealer Settings** — new Settings button in the header opens a modal to enter shop name, dealer name, and contact phone; these are stored locally per device and shown as a branded tagline beneath the headline
-- **Dealer branding in exports** — dealer info (`shopName`, `dealerName`, `phone`) is automatically embedded in every exported lead `.json` package
-- **Analytics export** — Settings → Download Analytics JSON outputs the complete event log for offline pilot review with your team
-- **Clear analytics** — reset the event log before handing the device to a new dealer
+- **Session analytics engine** — tracks `session_start`, `shade_selected` (with time-to-first-pick), `share_exported`, `contact_opened`, `contact_saved` in localStorage (up to 600 events)
+- **Pilot Analytics dashboard** — second tab inside the Leads modal; KPI cards (sessions/30d, avg decision time, contact rate, share rate) and a 7-day bar chart
+- **Dealer Settings** — Settings button opens a modal to set shop name, dealer name, and phone; shown as branded tagline in the hero
+- **Dealer branding in exports** — dealer info embedded in every exported lead `.json`
+- **Analytics export** — Settings → Download Analytics JSON for pilot review
+- **Clear analytics** — reset event log before handing device to a new dealer
+
+### Phase 4 — Backend Foundation (in progress)
+
+A full Node.js + Express + SQLite backend in `server/` with:
+
+| Endpoint | What it does |
+|----------|-------------|
+| `POST /api/auth/register` | Create a dealer account (shop name, email, password) — returns JWT |
+| `POST /api/auth/login` | Authenticate — returns JWT (30-day expiry) |
+| `GET /api/auth/me` | Validate token, return tenant profile |
+| `GET /api/leads` | List all leads for the signed-in dealer |
+| `POST /api/leads` | Create / upsert a lead (id, name, phone, shades, snapshot) |
+| `GET /api/leads/:id` | Single lead with full snapshot |
+| `DELETE /api/leads/:id` | Delete a lead |
+| `GET /api/shades` | Full catalog — searchable via `?q=` |
+| `GET /api/shades/:id` | Single shade |
+| `GET /api/dealer` | Get dealer profile |
+| `PUT /api/dealer` | Update shop name, dealer name, phone |
+| `POST /api/events` | Ingest a funnel analytics event |
+| `GET /api/events/summary` | 30-day funnel metrics (sessions, contact rate, share rate, avg decision time, 7-day daily breakdown) |
+
+**Frontend sync (graceful degradation):**
+- All leads sync to the server automatically when signed in; deletes propagate too
+- Every analytics event is sent to `/api/events` in addition to being stored locally
+- Dealer settings saved via `PUT /api/dealer` on form submit
+- On startup, a stored token is validated and leads are merged from the server
+- App stays fully functional offline — server sync is always best-effort
+
+**Server Sync in Settings modal:**
+- Sign In / Create Account tabs
+- Live connection status chip (green "Connected" / grey "Not connected")
+- Logout
+
+---
 
 ## User flow (demo script)
 
-1. Open the app → tap **Settings** → enter the shop name and your name → Save.
-2. Upload a room photo. The session timer starts.
-3. The app auto-suggests 5 matching shades and applies the first one to the walls.
-4. Adjust: switch shades, add wall tabs for separate zones, use brush or tap-to-select for precise masking, toggle before/after, drag the compare slider.
-5. Click **Contact Dealer** — fill in the customer's name and phone (10 seconds), hit Save Lead.
-6. The lead appears in the **Leads** inbox with a thumbnail.
-7. Open the lead → **Export Package** → the dealer gets a PNG + JSON (with dealer info) ready for follow-up.
-8. After the pilot period: **Settings → Download Analytics JSON** to review decision times and conversion rates.
+1. Start the server: `cd server && npm start`
+2. Open [http://localhost:3001](http://localhost:3001)
+3. **Settings → Server Sync → Create Account** — enter your shop name, email, password.
+4. **Settings → Dealer Profile** — set your dealer name and phone number → Save.
+5. Upload a room photo. The session timer starts and a `session_start` event fires (locally + server).
+6. The app suggests 5 matching shades — click one to apply it. Each pick fires `shade_selected` with time-to-first-pick.
+7. Adjust: add wall tabs, use brush or tap-to-select, toggle before/after, drag the compare slider.
+8. Click **Contact Dealer** — fill in customer name and phone → Save Lead.
+   - Lead saved locally and synced to `POST /api/leads`.
+9. **Leads → Export Package** — downloads snapshot PNG + `.json` (with dealer info).
+10. **Leads → Pilot Analytics** — review KPI cards and bar chart.
+11. After the pilot: **Settings → Download Analytics JSON** for the full event log.
+
+---
 
 ## Running tests
+
+### E2E (Playwright)
 
 ```bash
 pip install -r test-scripts/requirements.txt
 python3 -m playwright install chromium
 
-# Start the app server first, then:
-python3 test-scripts/frontend_e2e_playwright.py --app-url http://localhost:8080
+# Start a server first, then:
+python3 test-scripts/frontend_e2e_playwright.py --app-url http://localhost:3001
 ```
 
-The E2E suite covers: image upload, brush paint, brush erase, compare mode, and export.
+### API smoke test
+
+```bash
+cd server && npm start &   # start server
+
+# Register + full round-trip
+curl -s -X POST http://localhost:3001/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"shopName":"My Shop","email":"me@shop.com","password":"demo1234"}'
+```
+
+---
 
 ## React component
 
 `paint-preview-app/react-canvas-component/` contains a self-contained `WallRecolorCanvas.tsx` component and `pixelUtils.ts` you can copy into any React/Next.js project. See the [component README](paint-preview-app/react-canvas-component/README.md) for integration steps.
+
+---
 
 ## Roadmap
 
@@ -94,8 +165,9 @@ The E2E suite covers: image upload, brush paint, brush erase, compare mode, and 
 | 0 | Done | Product contract — scope, flow, success metrics |
 | 1 | Done | Decision Engine — masking, recolor, compare, share |
 | 2 | Done | Conversion layer — shade catalog, search, lead capture, inbox, cost estimator, session drafts |
-| 3 | In progress | Pilot validation — 3–5 dealers, analytics engine, dealer branding |
-| 4 | Planned | Backend foundation — auth, lead APIs, shade catalog |
-| 5+ | Future | CRM Lite, quoting, inventory, AI recommendations |
+| 3 | Done | Pilot validation — analytics engine, dealer branding, KPI dashboard |
+| 4 | In progress | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking |
+| 5 | Planned | CRM Lite — customer CRUD, site/project tracking, session timeline |
+| 6+ | Future | Quoting, inventory, credit ledger, AI recommendations |
 
 See [`master-plan.txt`](master-plan.txt) for the full execution plan with sprint breakdowns and success metrics.

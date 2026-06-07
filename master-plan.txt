@@ -85,11 +85,29 @@ Phase 3 - Pilot Validation (IN PROGRESS — started Jun 7 2026)
   - Settings modal: configure dealer name/shop/phone, export or clear analytics
   - Dealer info embedded in all exported lead JSON packages
 
-Phase 4 - Backend Foundation
-- Basic auth and tenant model
-- Lead APIs and preview metadata storage
-- Shade and dealer catalog APIs
-- Event tracking for funnel analytics
+Phase 4 - Backend Foundation (IN PROGRESS — started Jun 7 2026)
+- Basic auth and tenant model ✓
+- Lead APIs and preview metadata storage ✓
+- Shade and dealer catalog APIs ✓
+- Event tracking for funnel analytics ✓
+- Phase 4 backend built (server/ — Node.js + Express + SQLite):
+  - POST /api/auth/register + POST /api/auth/login + GET /api/auth/me (JWT, 30-day token, bcrypt)
+  - Tenant model: shop_name, dealer_name, phone, email — multi-tenant scoped
+  - GET/POST/DELETE /api/leads — per-tenant lead CRUD with snapshot storage
+  - GET /api/shades — catalog API seeded from shades.json (63 shades), searchable by ?q=
+  - GET/PUT /api/dealer — dealer profile API
+  - POST /api/events — funnel event ingestion (session_start, shade_selected, share_exported, contact_opened, contact_saved)
+  - GET /api/events/summary — 30-day funnel metrics: sessions, contact rate, share rate, avg decision time, 7-day bar data
+  - Express also serves paint-preview-app/ as static files (run one port: 3001)
+- Frontend API sync layer (graceful degradation — full offline mode preserved):
+  - apiRequest() helper with Bearer auth header
+  - syncLeadToServer() — leads POST to backend on capture
+  - deleteLeadFromServer() — backend delete on local delete
+  - syncLeadsFromServer() — on login, merges server leads into local store
+  - syncEventToServer() — every analytics event also POSTed to backend (best-effort)
+  - apiUpdateDealer() — dealer settings synced on save
+  - loginToServer() / registerOnServer() / logoutFromServer()
+  - Server Sync section added to Settings modal: Sign In / Create Account tabs, status chip
 
 Phase 5 - CRM Lite
 - Customer CRUD

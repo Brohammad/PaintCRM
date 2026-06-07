@@ -128,6 +128,11 @@ let currentDetailLeadId = null;
 const ANALYTICS_STORAGE_KEY = "paintcrm_analytics_v1";
 const DEALER_STORAGE_KEY = "paintcrm_dealer_v1";
 
+// Phase 4: backend API
+const API_TOKEN_KEY = "paintcrm_api_token_v1";
+const API_TENANT_KEY = "paintcrm_api_tenant_v1";
+let apiTenant = null; // { id, shopName, dealerName, phone, email }
+
 let analyticsEvents = [];
 let pilotSessionId = null;
 let pilotSessionStart = null;
@@ -1743,6 +1748,7 @@ function captureLeadFromForm(e) {
   leads.unshift(lead); // newest first
   saveLeads();
   trackContactSaved(lead.id); // Phase 3
+  syncLeadToServer(lead);     // Phase 4: best-effort server sync
   closeContactModal();
 
   showTransientToast(`Lead saved for ${name}. View in Leads inbox.`);
@@ -1854,11 +1860,11 @@ function closeLeadDetail() {
 
 function deleteCurrentLead() {
   if (!currentDetailLeadId) return;
-  leads = leads.filter((l) => l.id !== currentDetailLeadId);
+  const deletedId = currentDetailLeadId;
+  leads = leads.filter((l) => l.id !== deletedId);
   saveLeads();
+  deleteLeadFromServer(deletedId); // Phase 4: best-effort server sync
   closeLeadDetail();
-  // if leads modal was the caller path, re-open it to refresh list
-  // for simplicity just show a toast; user can re-open inbox
   showTransientToast("Lead deleted.");
 }
 
@@ -2044,6 +2050,213 @@ function clearSession() {
   updateRestoreDraftUI();
 }
 
+/* ===================== Phase 4: Backend API Sync ===================== */
+
+// API_BASE is empty so all paths are relative — works whether the app is
+// opened directly as a file (offline, no sync) or served by the Express server.
+const API_BASE = "";
+
+function getApiToken() {
+  try { return localStorage.getItem(API_TOKEN_KEY) || null; } catch { return null; }
+}
+function setApiToken(t) {
+  try { localStorage.setItem(API_TOKEN_KEY, t); } catch { /* storage full */ }
+}
+function clearApiToken() {
+  try { localStorage.removeItem(API_TOKEN_KEY); localStorage.removeItem(API_TENANT_KEY); } catch { /* nothing */ }
+  apiTenant = null;
+}
+
+async function apiRequest(method, path, body) {
+  try {
+    const token = getApiToken();
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(API_BASE + path, {
+      method,
+      headers,
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { data: null, error: data.error || `HTTP ${res.status}` };
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: err.message || "Network error" };
+  }
+}
+
+// Called at startup — tries to validate stored token + load tenant info
+async function loadApiSession() {
+  const token = getApiToken();
+  if (!token) return;
+  const { data, error } = await apiRequest("GET", "/api/auth/me");
+  if (error || !data?.tenant) { clearApiToken(); updateServerSyncUI(); return; }
+  apiTenant = data.tenant;
+  updateServerSyncUI();
+  await syncLeadsFromServer();
+}
+
+async function loginToServer(email, password) {
+  const { data, error } = await apiRequest("POST", "/api/auth/login", { email, password });
+  if (error) return { ok: false, error };
+  setApiToken(data.token);
+  apiTenant = data.tenant;
+  updateServerSyncUI();
+  await syncLeadsFromServer();
+  return { ok: true };
+}
+
+async function registerOnServer(shopName, dealerName, phone, email, password) {
+  const { data, error } = await apiRequest("POST", "/api/auth/register", { shopName, dealerName, phone, email, password });
+  if (error) return { ok: false, error };
+  setApiToken(data.token);
+  apiTenant = data.tenant;
+  updateServerSyncUI();
+  return { ok: true };
+}
+
+function logoutFromServer() {
+  clearApiToken();
+  updateServerSyncUI();
+  showTransientToast("Signed out from server.");
+}
+
+// Sync a single lead to the server (fire-and-forget; local state is source of truth)
+async function syncLeadToServer(lead) {
+  if (!getApiToken()) return;
+  await apiRequest("POST", "/api/leads", {
+    id: lead.id,
+    name: lead.name,
+    phone: lead.phone,
+    email: lead.email || "",
+    notes: lead.notes || "",
+    shades: lead.shades || [],
+    snapshotB64: lead.snapshot || "",
+    createdAt: new Date(lead.ts).toISOString(),
+  });
+}
+
+// Delete a lead from the server
+async function deleteLeadFromServer(leadId) {
+  if (!getApiToken()) return;
+  await apiRequest("DELETE", `/api/leads/${leadId}`);
+}
+
+// Fetch server leads and merge with local (server wins on conflict by ts)
+async function syncLeadsFromServer() {
+  if (!getApiToken()) return;
+  const { data, error } = await apiRequest("GET", "/api/leads");
+  if (error || !data?.leads) return;
+
+  const serverLeads = data.leads.map((l) => ({
+    id: l.id,
+    ts: new Date(l.createdAt).getTime(),
+    name: l.name,
+    phone: l.phone,
+    email: l.email || "",
+    notes: l.notes || "",
+    shades: l.shades || [],
+    snapshot: "",  // snapshot not included in list endpoint
+  }));
+
+  // Merge: keep local lead if it has a snapshot, otherwise take server version
+  const localById = new Map(leads.map((l) => [l.id, l]));
+  for (const sl of serverLeads) {
+    const existing = localById.get(sl.id);
+    if (!existing) localById.set(sl.id, sl);
+    // if exists locally with snapshot, keep local (it has richer data)
+  }
+  // Also push any local leads to server that the server doesn't know about
+  const serverIds = new Set(serverLeads.map((l) => l.id));
+  for (const local of leads) {
+    if (!serverIds.has(local.id)) syncLeadToServer(local);
+  }
+
+  leads = [...localById.values()].sort((a, b) => b.ts - a.ts);
+  saveLeads();
+  updateLeadsCount();
+}
+
+// Send a single analytics event to the server (best-effort, non-blocking)
+async function syncEventToServer(evt) {
+  if (!getApiToken() && !pilotSessionId) return;
+  const payload = { ...evt.data };
+  await apiRequest("POST", "/api/events", {
+    sessionId: evt.sessionId,
+    eventType: evt.type,
+    payload,
+  }).catch(() => { /* ignore network errors */ });
+}
+
+// Update dealer profile on server after saving settings
+async function apiUpdateDealer(settings) {
+  if (!getApiToken()) return;
+  await apiRequest("PUT", "/api/dealer", {
+    shopName: settings.shopName || "My Shop",
+    dealerName: settings.dealerName || "",
+    phone: settings.phone || "",
+  });
+}
+
+// Update the Settings modal server-sync section UI
+function updateServerSyncUI() {
+  const statusEl = document.getElementById("serverSyncStatus");
+  const loginSection = document.getElementById("serverLoginSection");
+  const loggedInSection = document.getElementById("serverLoggedInSection");
+  const tenantNameEl = document.getElementById("serverTenantName");
+
+  if (!statusEl) return;
+
+  if (apiTenant) {
+    statusEl.textContent = "Connected";
+    statusEl.className = "sync-status connected";
+    if (loginSection) loginSection.classList.add("hidden");
+    if (loggedInSection) loggedInSection.classList.remove("hidden");
+    if (tenantNameEl) tenantNameEl.textContent = `${apiTenant.shopName} (${apiTenant.email})`;
+  } else {
+    statusEl.textContent = "Not connected";
+    statusEl.className = "sync-status";
+    if (loginSection) loginSection.classList.remove("hidden");
+    if (loggedInSection) loggedInSection.classList.add("hidden");
+  }
+}
+
+// Handle the login / register form in Settings modal
+async function handleServerAuthSubmit(mode) {
+  const emailEl = document.getElementById("serverEmail");
+  const passEl = document.getElementById("serverPassword");
+  const shopEl = document.getElementById("serverShopName");
+  const errEl = document.getElementById("serverAuthError");
+  const btn = document.getElementById("serverAuthBtn");
+
+  const email = (emailEl?.value || "").trim();
+  const password = passEl?.value || "";
+  const shopName = (shopEl?.value || "").trim();
+
+  if (!email || !password) { if (errEl) errEl.textContent = "Email and password required."; return; }
+  if (mode === "register" && !shopName) { if (errEl) errEl.textContent = "Shop name required."; return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = mode === "login" ? "Signing in…" : "Registering…"; }
+  if (errEl) errEl.textContent = "";
+
+  let result;
+  if (mode === "login") {
+    result = await loginToServer(email, password);
+  } else {
+    result = await registerOnServer(shopName, dealerSettings.dealerName || "", dealerSettings.phone || "", email, password);
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = mode === "login" ? "Sign In" : "Register"; }
+
+  if (!result.ok) {
+    if (errEl) errEl.textContent = result.error || "Authentication failed.";
+    return;
+  }
+
+  showTransientToast(mode === "login" ? "Signed in — leads will sync to server." : "Account created! Leads will now sync.");
+  closeSettingsModal();
+}
+
 /* ===================== Phase 3: Pilot Validation Analytics ===================== */
 
 function generateEventId() {
@@ -2068,6 +2281,7 @@ function trackEvent(type, data = {}) {
   const evt = { id: generateEventId(), ts: Date.now(), type, sessionId: pilotSessionId || null, data };
   analyticsEvents.push(evt);
   saveAnalytics();
+  syncEventToServer(evt); // Phase 4: best-effort server sync
 }
 
 function startPilotSession() {
@@ -2252,6 +2466,7 @@ function openSettingsModal() {
   if (shopInput) shopInput.value = dealerSettings.shopName || "";
   if (dealerInput) dealerInput.value = dealerSettings.dealerName || "";
   if (phoneInput) phoneInput.value = dealerSettings.phone || "";
+  updateServerSyncUI(); // Phase 4: refresh connection status
   modal.classList.remove("hidden");
 }
 
@@ -2266,6 +2481,7 @@ function handleSettingsSubmit(e) {
   const dealerName = (document.getElementById("settingDealerName")?.value || "").trim();
   const phone = (document.getElementById("settingDealerPhone")?.value || "").trim();
   saveDealerSettings({ shopName, dealerName, phone });
+  apiUpdateDealer({ shopName, dealerName, phone }); // Phase 4: sync to server
   closeSettingsModal();
   showTransientToast("Settings saved.");
 }
@@ -2413,6 +2629,7 @@ loadShadeCatalog(); // non-blocking; catalog will be ready before any image is u
 loadLeads();
 loadAnalytics();       // Phase 3
 loadDealerSettings();  // Phase 3
+loadApiSession();      // Phase 4: validate stored token, sync leads from server
 updateRestoreDraftUI();
 if (leadsBtn) leadsBtn.disabled = false;
 
@@ -2464,6 +2681,39 @@ if (cancelSettingsBtnEl) cancelSettingsBtnEl.addEventListener("click", closeSett
 if (settingsFormEl) settingsFormEl.addEventListener("submit", handleSettingsSubmit);
 if (exportAnalyticsBtnEl) exportAnalyticsBtnEl.addEventListener("click", exportAnalyticsJson);
 if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnalyticsData);
+
+// Phase 4: server sync UI wiring
+(function wireServerSyncUI() {
+  const loginTabBtn     = document.getElementById("authTabLogin");
+  const registerTabBtn  = document.getElementById("authTabRegister");
+  const registerFields  = document.getElementById("registerOnlyFields");
+  const authBtn         = document.getElementById("serverAuthBtn");
+  const logoutBtn       = document.getElementById("serverLogoutBtn");
+  let authMode = "login";
+
+  if (loginTabBtn) loginTabBtn.addEventListener("click", () => {
+    authMode = "login";
+    loginTabBtn.classList.add("active");
+    if (registerTabBtn) registerTabBtn.classList.remove("active");
+    if (registerFields) registerFields.classList.add("hidden");
+    if (authBtn) authBtn.textContent = "Sign In";
+    const passEl = document.getElementById("serverPassword");
+    if (passEl) passEl.setAttribute("autocomplete", "current-password");
+  });
+
+  if (registerTabBtn) registerTabBtn.addEventListener("click", () => {
+    authMode = "register";
+    registerTabBtn.classList.add("active");
+    if (loginTabBtn) loginTabBtn.classList.remove("active");
+    if (registerFields) registerFields.classList.remove("hidden");
+    if (authBtn) authBtn.textContent = "Register";
+    const passEl = document.getElementById("serverPassword");
+    if (passEl) passEl.setAttribute("autocomplete", "new-password");
+  });
+
+  if (authBtn) authBtn.addEventListener("click", () => handleServerAuthSubmit(authMode));
+  if (logoutBtn) logoutBtn.addEventListener("click", logoutFromServer);
+})();
 
 // Backdrop click to close
 [contactModal, leadsModal, leadDetailModal, settingsModal].forEach((m) => {

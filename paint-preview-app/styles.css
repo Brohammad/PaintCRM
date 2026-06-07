@@ -922,3 +922,19 @@ body {
   vertical-align: middle;
   margin-left: 6px;
 }
+
+/* Phase 4: server sync status chip */
+.sync-status {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #f0f0f2;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+.sync-status.connected {
+  background: #e6f9f0;
+  color: #1a8a52;
+}
