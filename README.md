@@ -51,14 +51,25 @@ Open [http://localhost:8080](http://localhost:8080). No install, no build.
 - **Session draft save / restore** — the current workspace (image + wall color choices) is automatically saved as you work; "Restore draft" appears on fresh loads to resume without re-uploading; "New session" resets the canvas cleanly
 - **Storage safety** — graceful fallback when localStorage is full; no crashes
 
+### Phase 3 — Pilot Validation (in progress)
+
+- **Session analytics engine** — every customer interaction is tracked in localStorage: `session_start` (on image upload), `shade_selected` (with time-to-first-pick), `share_exported`, `contact_opened`, `contact_saved` (with time-to-action); up to 600 events retained
+- **Pilot Analytics dashboard** — second tab inside the Leads modal; shows four KPI cards (sessions in last 30 days, average decision time, contact rate %, share rate %) and a 7-day session bar chart — no server needed
+- **Dealer Settings** — new Settings button in the header opens a modal to enter shop name, dealer name, and contact phone; these are stored locally per device and shown as a branded tagline beneath the headline
+- **Dealer branding in exports** — dealer info (`shopName`, `dealerName`, `phone`) is automatically embedded in every exported lead `.json` package
+- **Analytics export** — Settings → Download Analytics JSON outputs the complete event log for offline pilot review with your team
+- **Clear analytics** — reset the event log before handing the device to a new dealer
+
 ## User flow (demo script)
 
-1. Open the app and upload a room photo.
-2. The app auto-suggests 5 matching shades and applies the first one to the walls.
-3. Adjust: switch shades, add wall tabs for separate zones, use brush or tap-to-select for precise masking, toggle before/after, drag the compare slider.
-4. Click **Contact Dealer** — fill in the customer's name and phone (10 seconds), hit Save Lead.
-5. The lead appears in the **Leads** inbox with a thumbnail.
-6. Open the lead → **Export Package** → the dealer gets a PNG + JSON ready for follow-up.
+1. Open the app → tap **Settings** → enter the shop name and your name → Save.
+2. Upload a room photo. The session timer starts.
+3. The app auto-suggests 5 matching shades and applies the first one to the walls.
+4. Adjust: switch shades, add wall tabs for separate zones, use brush or tap-to-select for precise masking, toggle before/after, drag the compare slider.
+5. Click **Contact Dealer** — fill in the customer's name and phone (10 seconds), hit Save Lead.
+6. The lead appears in the **Leads** inbox with a thumbnail.
+7. Open the lead → **Export Package** → the dealer gets a PNG + JSON (with dealer info) ready for follow-up.
+8. After the pilot period: **Settings → Download Analytics JSON** to review decision times and conversion rates.
 
 ## Running tests
 
@@ -83,7 +94,7 @@ The E2E suite covers: image upload, brush paint, brush erase, compare mode, and 
 | 0 | Done | Product contract — scope, flow, success metrics |
 | 1 | Done | Decision Engine — masking, recolor, compare, share |
 | 2 | Done | Conversion layer — shade catalog, search, lead capture, inbox, cost estimator, session drafts |
-| 3 | Planned | Pilot validation — 3–5 dealers, real usage metrics |
+| 3 | In progress | Pilot validation — 3–5 dealers, analytics engine, dealer branding |
 | 4 | Planned | Backend foundation — auth, lead APIs, shade catalog |
 | 5+ | Future | CRM Lite, quoting, inventory, AI recommendations |
 
