@@ -1,9 +1,8 @@
 const express = require("express");
-const db = require("../db");
+const { query } = require("../lib/db");
 const { optionalAuth } = require("../middleware/auth");
 
 const router = express.Router();
-router.use(optionalAuth);
 
 const VALID_TYPES = new Set([
   "session_start",
@@ -15,116 +14,161 @@ const VALID_TYPES = new Set([
 ]);
 
 // POST /api/events — record a funnel analytics event
-router.post("/", (req, res) => {
-  const { sessionId, eventType, payload } = req.body || {};
+router.post("/", optionalAuth, async (req, res, next) => {
+  try {
+    const { sessionId, eventType, payload } = req.body || {};
 
-  if (!eventType) return res.status(400).json({ error: "eventType is required" });
-  if (!VALID_TYPES.has(eventType))
-    return res.status(400).json({ error: `Unknown event type. Valid: ${[...VALID_TYPES].join(", ")}` });
+    if (!eventType) {
+      return res.status(400).json({ error: "eventType is required" });
+    }
+    
+    if (!VALID_TYPES.has(eventType)) {
+      return res.status(400).json({ 
+        error: `Unknown event type. Valid: ${[...VALID_TYPES].join(", ")}` 
+      });
+    }
 
-  const tenantId = req.tenant ? req.tenant.id : null;
-  const payloadJson = payload ? JSON.stringify(payload) : null;
+    const tenantId = req.tenant ? req.tenant.id : null;
+    const payloadJson = JSON.stringify(payload || {});
+    const ipAddress = req.ip;
+    const userAgent = req.headers["user-agent"] || "";
 
-  const result = db.prepare(`
-    INSERT INTO events (tenant_id, session_id, event_type, payload_json)
-    VALUES (?, ?, ?, ?)
-  `).run(tenantId, sessionId || null, eventType, payloadJson);
+    const result = await query(
+      `INSERT INTO events (tenant_id, session_id, event_type, payload_json, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [tenantId, sessionId || null, eventType, payloadJson, ipAddress, userAgent]
+    );
 
-  res.status(201).json({ ok: true, id: result.lastInsertRowid });
+    res.status(201).json({ ok: true, id: result.rows[0].id });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // GET /api/events/summary — funnel analytics summary (requires auth)
-router.get("/summary", (req, res) => {
-  if (!req.tenant) return res.status(401).json({ error: "Auth required for summary" });
+router.get("/summary", async (req, res, next) => {
+  try {
+    if (!req.tenant) {
+      return res.status(401).json({ error: "Auth required for summary" });
+    }
 
-  const tenantId = req.tenant.id;
+    const tenantId = req.tenant.id;
 
-  // Sessions in last 30 days
-  const sessions = db.prepare(`
-    SELECT COUNT(DISTINCT session_id) as count
-    FROM events WHERE tenant_id = ? AND event_type = 'session_start'
-      AND ts >= datetime('now', '-30 days')
-  `).get(tenantId);
+    // Sessions in last 30 days
+    const sessionsResult = await query(
+      `SELECT COUNT(DISTINCT session_id) as count
+       FROM events 
+       WHERE tenant_id = $1 AND event_type = 'session_start'
+         AND ts >= NOW() - INTERVAL '30 days'`,
+      [tenantId]
+    );
 
-  // Contact rate = contact_saved / session_start (30d)
-  const contacts = db.prepare(`
-    SELECT COUNT(DISTINCT session_id) as count FROM events
-    WHERE tenant_id = ? AND event_type = 'contact_saved'
-      AND ts >= datetime('now', '-30 days')
-  `).get(tenantId);
+    // Contact rate
+    const contactsResult = await query(
+      `SELECT COUNT(DISTINCT session_id) as count 
+       FROM events
+       WHERE tenant_id = $1 AND event_type = 'contact_saved'
+         AND ts >= NOW() - INTERVAL '30 days'`,
+      [tenantId]
+    );
 
-  // Share rate
-  const shares = db.prepare(`
-    SELECT COUNT(*) as count FROM events
-    WHERE tenant_id = ? AND event_type = 'share_exported'
-      AND ts >= datetime('now', '-30 days')
-  `).get(tenantId);
+    // Share rate
+    const sharesResult = await query(
+      `SELECT COUNT(*) as count 
+       FROM events
+       WHERE tenant_id = $1 AND event_type = 'share_exported'
+         AND ts >= NOW() - INTERVAL '30 days'`,
+      [tenantId]
+    );
 
-  // Avg decision time (ms) from session_start to first shade_selected per session
-  const decisionRows = db.prepare(`
-    WITH session_start AS (
-      SELECT session_id, ts FROM events
-      WHERE tenant_id = ? AND event_type = 'session_start'
-    ),
-    first_shade AS (
-      SELECT session_id, MIN(ts) as shade_ts FROM events
-      WHERE tenant_id = ? AND event_type = 'shade_selected'
-      GROUP BY session_id
-    )
-    SELECT AVG(
-      CAST((julianday(fs.shade_ts) - julianday(ss.ts)) * 86400000 AS INTEGER)
-    ) as avg_ms
-    FROM session_start ss JOIN first_shade fs ON ss.session_id = fs.session_id
-    WHERE ss.ts >= datetime('now', '-30 days')
-  `).get(tenantId, tenantId);
+    // Avg decision time using window functions
+    const decisionResult = await query(
+      `WITH session_times AS (
+         SELECT 
+           session_id,
+           MIN(CASE WHEN event_type = 'session_start' THEN ts END) as start_time,
+           MIN(CASE WHEN event_type = 'shade_selected' THEN ts END) as first_shade_time
+         FROM events
+         WHERE tenant_id = $1 
+           AND ts >= NOW() - INTERVAL '30 days'
+           AND session_id IS NOT NULL
+         GROUP BY session_id
+         HAVING COUNT(CASE WHEN event_type = 'session_start' THEN 1 END) > 0
+            AND COUNT(CASE WHEN event_type = 'shade_selected' THEN 1 END) > 0
+       )
+       SELECT AVG(EXTRACT(EPOCH FROM (first_shade_time - start_time)) * 1000) as avg_ms
+       FROM session_times`,
+      [tenantId]
+    );
 
-  // 7-day session bar chart (date → count)
-  const daily = db.prepare(`
-    SELECT date(ts) as day, COUNT(DISTINCT session_id) as sessions
-    FROM events WHERE tenant_id = ? AND event_type = 'session_start'
-      AND ts >= datetime('now', '-7 days')
-    GROUP BY date(ts) ORDER BY day
-  `).all(tenantId);
+    // 7-day daily sessions
+    const dailyResult = await query(
+      `SELECT DATE(ts) as day, COUNT(DISTINCT session_id) as sessions
+       FROM events 
+       WHERE tenant_id = $1 AND event_type = 'session_start'
+         AND ts >= NOW() - INTERVAL '7 days'
+       GROUP BY DATE(ts) 
+       ORDER BY day`,
+      [tenantId]
+    );
 
-  // Total leads count
-  const leadsCount = db.prepare("SELECT COUNT(*) as count FROM leads WHERE tenant_id = ?").get(tenantId);
+    // Total leads count
+    const leadsResult = await query(
+      "SELECT COUNT(*) as count FROM leads WHERE tenant_id = $1",
+      [tenantId]
+    );
 
-  const sessionCount = sessions.count;
-  const contactCount = contacts.count;
-  const shareCount = shares.count;
+    const sessionCount = parseInt(sessionsResult.rows[0]?.count || 0);
+    const contactCount = parseInt(contactsResult.rows[0]?.count || 0);
+    const shareCount = parseInt(sharesResult.rows[0]?.count || 0);
 
-  res.json({
-    period: "30d",
-    sessions: sessionCount,
-    contacts: contactCount,
-    shares: shareCount,
-    leads: leadsCount.count,
-    contactRate: sessionCount > 0 ? Math.round((contactCount / sessionCount) * 100) : 0,
-    shareRate: sessionCount > 0 ? Math.round((shareCount / sessionCount) * 100) : 0,
-    avgDecisionMs: decisionRows.avg_ms ? Math.round(decisionRows.avg_ms) : null,
-    daily,
-  });
+    res.json({
+      period: "30d",
+      sessions: sessionCount,
+      contacts: contactCount,
+      shares: shareCount,
+      leads: parseInt(leadsResult.rows[0]?.count || 0),
+      contactRate: sessionCount > 0 ? Math.round((contactCount / sessionCount) * 100) : 0,
+      shareRate: sessionCount > 0 ? Math.round((shareCount / sessionCount) * 100) : 0,
+      avgDecisionMs: decisionResult.rows[0]?.avg_ms 
+        ? Math.round(parseFloat(decisionResult.rows[0].avg_ms)) 
+        : null,
+      daily: dailyResult.rows,
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // GET /api/events — raw events list (auth required, last 500)
-router.get("/", (req, res) => {
-  if (!req.tenant) return res.status(401).json({ error: "Auth required" });
+router.get("/", async (req, res, next) => {
+  try {
+    if (!req.tenant) {
+      return res.status(401).json({ error: "Auth required" });
+    }
 
-  const rows = db.prepare(`
-    SELECT id, session_id, event_type, payload_json, ts
-    FROM events WHERE tenant_id = ?
-    ORDER BY ts DESC LIMIT 500
-  `).all(req.tenant.id);
+    const result = await query(
+      `SELECT id, session_id, event_type, payload_json, ts
+       FROM events 
+       WHERE tenant_id = $1
+       ORDER BY ts DESC 
+       LIMIT 500`,
+      [req.tenant.id]
+    );
 
-  res.json({
-    events: rows.map((r) => ({
-      id: r.id,
-      sessionId: r.session_id,
-      eventType: r.event_type,
-      payload: r.payload_json ? JSON.parse(r.payload_json) : null,
-      ts: r.ts,
-    })),
-  });
+    res.json({
+      events: result.rows.map(r => ({
+        id: r.id,
+        sessionId: r.session_id,
+        eventType: r.event_type,
+        payload: r.payload_json,
+        ts: r.ts,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;

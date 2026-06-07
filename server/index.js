@@ -1,53 +1,52 @@
-// Load .env if present (dev convenience — not required in prod)
-try { require("fs").accessSync(require("path").join(__dirname, ".env")); require("child_process").execSync(""); } catch {}
-if (require("fs").existsSync(require("path").join(__dirname, ".env"))) {
-  const lines = require("fs").readFileSync(require("path").join(__dirname, ".env"), "utf8").split("\n");
-  for (const line of lines) {
-    const m = line.match(/^([^#=]+)=(.*)$/);
-    if (m) process.env[m[1].trim()] = m[2].trim();
-  }
-}
+// Load environment variables
+require('dotenv').config();
 
-const express = require("express");
-const cors = require("cors");
-const path = require("path");
+const app = require('./app');
+const { closePool } = require('./lib/db');
 
-const app = express();
 const PORT = process.env.PORT || 3001;
-
-// ─── Middleware ────────────────────────────────────────────────────────────────
-
-app.use(cors());
-app.use(express.json({ limit: "10mb" }));   // leads carry base64 snapshots
-
-// ─── API Routes ───────────────────────────────────────────────────────────────
-
-app.use("/api/auth",   require("./routes/auth"));
-app.use("/api/leads",  require("./routes/leads"));
-app.use("/api/shades", require("./routes/shades"));
-app.use("/api/dealer", require("./routes/dealer"));
-app.use("/api/events", require("./routes/events"));
-
-// Health check
-app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
-
-// ─── Auth page (standalone login) ───────────────────────────────────────────────
-
-app.get("/login", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "login.html"));
-});
-
-// ─── Serve frontend (static) ──────────────────────────────────────────────────
-
-const FRONTEND_DIR = path.join(__dirname, "../paint-preview-app");
-app.use(express.static(FRONTEND_DIR));
-// SPA fallback — serve index.html for any unmatched GET
-app.get("*", (_req, res) => res.sendFile(path.join(FRONTEND_DIR, "index.html")));
-
-// ─── Start ────────────────────────────────────────────────────────────────────
-
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`PaintCRM server running → http://localhost:${PORT}`);
   console.log(`  API base: http://localhost:${PORT}/api`);
-  console.log(`  Frontend: http://localhost:${PORT}`);
+  console.log(`  Health: http://localhost:${PORT}/api/health`);
+  console.log(`  Metrics: http://localhost:${PORT}/metrics`);
+  console.log(`  Login: http://localhost:${PORT}/login`);
+});
+
+// Graceful shutdown
+function shutdown(signal) {
+  console.log(`\n${signal} received. Starting graceful shutdown...`);
+  
+  server.close(async () => {
+    console.log('HTTP server closed');
+    
+    try {
+      await closePool();
+      console.log('Database connections closed');
+      process.exit(0);
+    } catch (err) {
+      console.error('Error during shutdown:', err);
+      process.exit(1);
+    }
+  });
+
+  // Force shutdown after 30 seconds
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 30000);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Handle uncaught errors
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  shutdown('uncaughtException');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  shutdown('unhandledRejection');
 });
