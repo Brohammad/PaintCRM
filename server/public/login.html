@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — PaintCRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1d1d1f;
+      --muted: #6e6e73;
+      --border: rgba(0,0,0,0.08);
+      --primary: #0b5cff;
+      --primary-600: #094fd9;
+      --danger: #c0392b;
+      --success: #27ae60;
+      --shadow: 0 10px 40px rgba(0,0,0,0.08);
+      --radius: 18px;
+      --radius-sm: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+      line-height: 1.45;
+    }
+
+    .login-wrap {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 32px 28px;
+    }
+
+    .brand {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .brand h1 {
+      font-family: "Fraunces", Georgia, serif;
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin: 0 0 6px;
+      letter-spacing: -0.02em;
+    }
+
+    .brand p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      background: var(--bg);
+      padding: 4px;
+      border-radius: var(--radius-sm);
+    }
+
+    .tab {
+      flex: 1;
+      padding: 10px 14px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-weight: 500;
+      font-size: 0.95rem;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tab.active {
+      background: var(--card);
+      color: var(--text);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .form-section {
+      display: none;
+    }
+
+    .form-section.active {
+      display: block;
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+
+    .field input {
+      width: 100%;
+      padding: 12px 14px;
+      font: inherit;
+      font-size: 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fff;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .field input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(11, 92, 255, 0.12);
+    }
+
+    .field input::placeholder {
+      color: #aaa;
+    }
+
+    .hint {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 14px 18px;
+      font: inherit;
+      font-weight: 600;
+      font-size: 1rem;
+      color: #fff;
+      background: var(--primary);
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.05s ease;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-600);
+    }
+
+    .btn-primary:active {
+      transform: translateY(1px);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .message {
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    .message.error {
+      display: block;
+      background: #fdecea;
+      color: var(--danger);
+      border: 1px solid rgba(192, 57, 43, 0.2);
+    }
+
+    .message.success {
+      display: block;
+      background: #e8f8f0;
+      color: var(--success);
+      border: 1px solid rgba(39, 174, 96, 0.2);
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .footer a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 20px 0;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+
+    .back-link:hover {
+      color: var(--text);
+    }
+
+    @media (max-width: 480px) {
+      .login-card {
+        padding: 24px 20px;
+      }
+      .brand h1 {
+        font-size: 1.4rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <a href="/" class="back-link">← Back to app</a>
+
+      <div class="brand">
+        <h1>PaintCRM</h1>
+        <p>Sign in to sync leads and analytics</p>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab active" id="tabSignIn" role="tab" aria-selected="true">Sign In</button>
+        <button class="tab" id="tabRegister" role="tab" aria-selected="false">Create Account</button>
+      </div>
+
+      <div id="message" class="message"></div>
+
+      <!-- Sign In Form -->
+      <form id="signInForm" class="form-section active" autocomplete="off">
+        <div class="field">
+          <label for="loginEmail">Email</label>
+          <input id="loginEmail" type="email" placeholder="you@shop.com" required autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="loginPassword">Password</label>
+          <input id="loginPassword" type="password" placeholder="••••••" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn-primary" id="loginBtn">Sign In</button>
+        <p class="hint">Your leads and analytics will sync across devices.</p>
+      </form>
+
+      <!-- Register Form -->
+      <form id="registerForm" class="form-section" autocomplete="off">
+        <div class="field">
+          <label for="regShopName">Shop Name <span style="color:var(--danger)">*</span></label>
+          <input id="regShopName" type="text" placeholder="e.g. Kerala Paints, Kochi" required autocomplete="organization" />
+        </div>
+        <div class="field">
+          <label for="regDealerName">Your Name</label>
+          <input id="regDealerName" type="text" placeholder="e.g. Ravi Kumar" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="regPhone">Phone</label>
+          <input id="regPhone" type="tel" placeholder="+91 98765 43210" autocomplete="tel" />
+        </div>
+        <div class="field">
+          <label for="regEmail">Email <span style="color:var(--danger)">*</span></label>
+          <input id="regEmail" type="email" placeholder="you@shop.com" required autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="regPassword">Password <span style="color:var(--danger)">*</span></label>
+          <input id="regPassword" type="password" placeholder="Min 6 characters" required minlength="6" autocomplete="new-password" />
+          <p class="hint">At least 6 characters. You'll use this to sign in on any device.</p>
+        </div>
+        <button type="submit" class="btn-primary" id="registerBtn">Create Account</button>
+      </form>
+
+      <div class="divider"></div>
+
+      <div class="footer">
+        <p>Need help? <a href="mailto:support@paintcrm.example">Contact support</a></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Tab switching
+    const tabSignIn = document.getElementById('tabSignIn');
+    const tabRegister = document.getElementById('tabRegister');
+    const signInForm = document.getElementById('signInForm');
+    const registerForm = document.getElementById('registerForm');
+    const messageEl = document.getElementById('message');
+
+    function showTab(tab) {
+      messageEl.className = 'message';
+      messageEl.textContent = '';
+      if (tab === 'signin') {
+        tabSignIn.classList.add('active');
+        tabSignIn.setAttribute('aria-selected', 'true');
+        tabRegister.classList.remove('active');
+        tabRegister.setAttribute('aria-selected', 'false');
+        signInForm.classList.add('active');
+        registerForm.classList.remove('active');
+      } else {
+        tabRegister.classList.add('active');
+        tabRegister.setAttribute('aria-selected', 'true');
+        tabSignIn.classList.remove('active');
+        tabSignIn.setAttribute('aria-selected', 'false');
+        registerForm.classList.add('active');
+        signInForm.classList.remove('active');
+      }
+    }
+
+    tabSignIn.addEventListener('click', () => showTab('signin'));
+    tabRegister.addEventListener('click', () => showTab('register'));
+
+    // API helpers
+    async function apiPost(path, body) {
+      const res = await fetch('/api' + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    }
+
+    function setToken(t) {
+      try { localStorage.setItem('paintcrm_api_token_v1', t); } catch {}
+    }
+
+    function getRedirect() {
+      const params = new URLSearchParams(location.search);
+      return params.get('redirect') || '/';
+    }
+
+    function showError(msg) {
+      messageEl.textContent = msg;
+      messageEl.className = 'message error';
+    }
+
+    function showSuccess(msg) {
+      messageEl.textContent = msg;
+      messageEl.className = 'message success';
+    }
+
+    // Sign In
+    signInForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const btn = document.getElementById('loginBtn');
+
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
+
+      const { ok, data } = await apiPost('/auth/login', { email, password });
+
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+
+      if (!ok) {
+        showError(data?.error || 'Invalid email or password.');
+        return;
+      }
+
+      setToken(data.token);
+      showSuccess('Signed in! Redirecting…');
+      setTimeout(() => {
+        location.href = getRedirect();
+      }, 600);
+    });
+
+    // Register
+    registerForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const shopName = document.getElementById('regShopName').value.trim();
+      const dealerName = document.getElementById('regDealerName').value.trim();
+      const phone = document.getElementById('regPhone').value.trim();
+      const email = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPassword').value;
+      const btn = document.getElementById('registerBtn');
+
+      if (password.length < 6) {
+        showError('Password must be at least 6 characters.');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Creating account…';
+
+      const { ok, status, data } = await apiPost('/auth/register', {
+        shopName, dealerName, phone, email, password
+      });
+
+      btn.disabled = false;
+      btn.textContent = 'Create Account';
+
+      if (!ok) {
+        if (status === 409) {
+          showError('An account with this email already exists.');
+        } else {
+          showError(data?.error || 'Could not create account. Please try again.');
+        }
+        return;
+      }
+
+      setToken(data.token);
+      showSuccess('Account created! Redirecting…');
+      setTimeout(() => {
+        location.href = getRedirect();
+      }, 600);
+    });
+
+    // Auto-focus first field
+    document.getElementById('loginEmail').focus();
+  </script>
+</body>
+</html>

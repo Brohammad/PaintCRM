@@ -31,6 +31,12 @@ app.use("/api/events", require("./routes/events"));
 // Health check
 app.get("/api/health", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
+// ─── Auth page (standalone login) ───────────────────────────────────────────────
+
+app.get("/login", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "login.html"));
+});
+
 // ─── Serve frontend (static) ──────────────────────────────────────────────────
 
 const FRONTEND_DIR = path.join(__dirname, "../paint-preview-app");
