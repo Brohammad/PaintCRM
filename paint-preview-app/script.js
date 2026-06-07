@@ -1604,19 +1604,19 @@ function getShadeMetaForHex(hex) {
 }
 
 function runShadeSearch(query) {
-  const q = query.trim().toLowerCase();
-  if (!q) {
+  const raw = query.trim().toLowerCase();
+  if (!raw) {
     shadeSearchResults.innerHTML = "";
     shadeSearchResults.classList.add("hidden");
     return;
   }
+  // Split into tokens so "dulux teal" finds Dulux shades that contain "teal" anywhere
+  const tokens = raw.split(/\s+/).filter(Boolean);
   const catalog = SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES;
-  const results = catalog.filter((s) =>
-    s.name.toLowerCase().includes(q) ||
-    (s.brand || "").toLowerCase().includes(q) ||
-    (s.collection || "").toLowerCase().includes(q) ||
-    s.hex.toLowerCase().includes(q)
-  ).slice(0, 12);
+  const results = catalog.filter((s) => {
+    const haystack = [s.name, s.brand || "", s.collection || "", s.hex, s.tags || ""].join(" ").toLowerCase();
+    return tokens.every((t) => haystack.includes(t));
+  }).slice(0, 12);
 
   shadeSearchResults.innerHTML = "";
   if (!results.length) {
