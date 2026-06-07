@@ -19,6 +19,35 @@ const opacitySlider = document.getElementById("opacitySlider");
 const sensitivitySlider = document.getElementById("sensitivitySlider");
 const edgeFeatherSlider = document.getElementById("edgeFeatherSlider");
 
+// Phase 2 conversion elements
+const contactBtn = document.getElementById("contactBtn");
+const leadsBtn = document.getElementById("leadsBtn");
+const leadsCountEl = document.getElementById("leadsCount");
+const restoreDraftBtn = document.getElementById("restoreDraftBtn");
+
+const contactModal = document.getElementById("contactModal");
+const closeContactBtn = document.getElementById("closeContactBtn");
+const cancelContactBtn = document.getElementById("cancelContactBtn");
+const contactForm = document.getElementById("contactForm");
+const leadNameInput = document.getElementById("leadName");
+const leadPhoneInput = document.getElementById("leadPhone");
+const leadEmailInput = document.getElementById("leadEmail");
+const leadNotesInput = document.getElementById("leadNotes");
+const leadShadesSummary = document.getElementById("leadShadesSummary");
+const leadSnapshotCanvas = document.getElementById("leadSnapshotCanvas");
+
+const leadsModal = document.getElementById("leadsModal");
+const closeLeadsBtn = document.getElementById("closeLeadsBtn");
+const closeLeads2Btn = document.getElementById("closeLeads2Btn");
+const leadsListEl = document.getElementById("leadsList");
+const clearAllLeadsBtn = document.getElementById("clearAllLeadsBtn");
+
+const leadDetailModal = document.getElementById("leadDetailModal");
+const closeDetailBtn = document.getElementById("closeDetailBtn");
+const leadDetailBody = document.getElementById("leadDetailBody");
+const deleteLeadBtn = document.getElementById("deleteLeadBtn");
+const exportLeadBtn = document.getElementById("exportLeadBtn");
+
 const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
 const compareCanvas = document.getElementById("compareCanvas");
@@ -72,6 +101,12 @@ const state = {
   mlReady: false,
   mlError: null
 };
+
+// Phase 2: local leads + draft persistence
+const LEADS_STORAGE_KEY = "paintcrm_leads_v1";
+const DRAFT_STORAGE_KEY = "paintcrm_draft_v1";
+let leads = [];
+let currentDetailLeadId = null;
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -844,6 +879,7 @@ function invalidateZoneAuto(zone) {
 function setControlsEnabled(enabled) {
   [
     exportBtn,
+    contactBtn,
     beforeAfterToggle,
     compareToggle,
     mlAssistToggle,
@@ -865,6 +901,8 @@ function setControlsEnabled(enabled) {
   ].forEach((el) => {
     el.disabled = !enabled;
   });
+  // Leads inbox is always available (even with no current preview)
+  if (leadsBtn) leadsBtn.disabled = false;
 }
 
 function toAlphaMask(binaryMask) {
@@ -990,6 +1028,7 @@ function setActiveShade(shade) {
   activeShadeHexEl.textContent = shade.hex;
   renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
   drawPreview();
+  saveDraft();
 }
 
 function setCompareShade(shade) {
@@ -1014,6 +1053,7 @@ function setActiveZone(zoneId) {
   renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
   updateMaskStatus();
   drawPreview();
+  saveDraft();
 }
 
 function getZoneMask(zone, pixels, sensitivity) {
@@ -1377,6 +1417,7 @@ function addWallTab() {
   const zone = createZone(`Wall ${state.zones.length + 1}`, state.activeShade.hex);
   state.zones.push(zone);
   setActiveZone(zone.id);
+  saveDraft();
 }
 
 function removeActiveWallTab() {
@@ -1385,6 +1426,7 @@ function removeActiveWallTab() {
   if (idx === -1) return;
   state.zones.splice(idx, 1);
   setActiveZone(state.zones[Math.max(0, idx - 1)].id);
+  saveDraft();
 }
 
 function initializeShadesFromImage() {
@@ -1422,6 +1464,7 @@ function initializeShadesFromImage() {
   canvasHint.classList.add("hidden");
   drawPreview();
   ensureMlModel().then(() => runMlSegmentationForCurrentImage());
+  saveDraft();
 }
 
 function handleImageUpload(file) {
@@ -1431,6 +1474,7 @@ function handleImageUpload(file) {
     img.onload = () => {
       state.originalImage = img;
       initializeShadesFromImage();
+      updateRestoreDraftUI();
     };
     img.src = reader.result;
   };
@@ -1460,6 +1504,355 @@ async function exportPreview() {
   link.href = dataUrl;
   link.click();
 }
+
+/* ===================== Phase 2: Conversion Layer ===================== */
+
+function loadLeads() {
+  try {
+    const raw = localStorage.getItem(LEADS_STORAGE_KEY);
+    leads = raw ? JSON.parse(raw) : [];
+  } catch {
+    leads = [];
+  }
+  updateLeadsCount();
+}
+
+function saveLeads() {
+  try {
+    localStorage.setItem(LEADS_STORAGE_KEY, JSON.stringify(leads));
+  } catch (e) {
+    console.warn("Could not persist leads", e);
+  }
+  updateLeadsCount();
+}
+
+function updateLeadsCount() {
+  if (leadsCountEl) leadsCountEl.textContent = String(leads.length);
+}
+
+function getShadeNameForHex(hex) {
+  const found = state.shades.find((s) => s.hex.toLowerCase() === (hex || "").toLowerCase());
+  return found ? found.name : "Custom";
+}
+
+function openContactModal() {
+  if (!state.originalImage || !state.zones.length) return;
+  // populate shades summary
+  leadShadesSummary.innerHTML = "";
+  state.zones.forEach((zone) => {
+    const name = getShadeNameForHex(zone.shadeHex);
+    const row = document.createElement("span");
+    row.className = "lead-shade";
+    row.innerHTML = `<span class="sw" style="background:${zone.shadeHex}"></span><span>${zone.label} — ${name} <span class="muted">${zone.shadeHex}</span></span>`;
+    leadShadesSummary.appendChild(row);
+  });
+
+  // snapshot current preview canvas (what user sees now) into the modal canvas
+  const snapCtx = leadSnapshotCanvas.getContext("2d", { willReadFrequently: true });
+  snapCtx.clearRect(0, 0, leadSnapshotCanvas.width, leadSnapshotCanvas.height);
+  // fit previewCanvas into the snapshot canvas preserving aspect
+  const srcW = previewCanvas.width;
+  const srcH = previewCanvas.height;
+  const dstW = leadSnapshotCanvas.width;
+  const dstH = leadSnapshotCanvas.height;
+  const srcRatio = srcW / srcH;
+  const dstRatio = dstW / dstH;
+  let dw, dh, dx, dy;
+  if (srcRatio > dstRatio) {
+    dw = dstW;
+    dh = dstW / srcRatio;
+    dx = 0;
+    dy = (dstH - dh) / 2;
+  } else {
+    dh = dstH;
+    dw = dstH * srcRatio;
+    dx = (dstW - dw) / 2;
+    dy = 0;
+  }
+  snapCtx.drawImage(previewCanvas, dx, dy, dw, dh);
+
+  // reset form fields (keep previous name/phone for speed in demo flow)
+  // but clear notes at least
+  if (!leadNameInput.value) leadNameInput.value = "";
+  if (!leadPhoneInput.value) leadPhoneInput.value = "";
+  leadEmailInput.value = "";
+  leadNotesInput.value = "";
+
+  contactModal.classList.remove("hidden");
+  // focus first field
+  setTimeout(() => leadNameInput.focus(), 0);
+}
+
+function closeContactModal() {
+  contactModal.classList.add("hidden");
+}
+
+function captureLeadFromForm(e) {
+  e.preventDefault();
+  if (!state.originalImage) return;
+
+  const name = (leadNameInput.value || "").trim();
+  const phone = (leadPhoneInput.value || "").trim();
+  if (!name || !phone) return;
+
+  // build shades payload from current zones
+  const shades = state.zones.map((z) => ({
+    wall: z.label,
+    hex: z.shadeHex,
+    name: getShadeNameForHex(z.shadeHex)
+  }));
+
+  // snapshot from the modal canvas (already rendered)
+  const snapDataUrl = leadSnapshotCanvas.toDataURL("image/png");
+
+  const lead = {
+    id: "lead_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+    ts: Date.now(),
+    name,
+    phone,
+    email: (leadEmailInput.value || "").trim(),
+    notes: (leadNotesInput.value || "").trim(),
+    shades,
+    snapshot: snapDataUrl
+  };
+
+  leads.unshift(lead); // newest first
+  saveLeads();
+  closeContactModal();
+
+  // friendly confirmation (non-blocking)
+  showTransientToast(`Lead saved for ${name}. View in Leads inbox.`);
+}
+
+function showTransientToast(msg) {
+  const t = document.createElement("div");
+  t.textContent = msg;
+  t.style.cssText = "position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1d1d1f;color:#fff;padding:10px 16px;border-radius:999px;font-size:0.9rem;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:2000;";
+  document.body.appendChild(t);
+  setTimeout(() => {
+    t.style.transition = "opacity 160ms ease";
+    t.style.opacity = "0";
+    setTimeout(() => t.remove(), 160);
+  }, 1600);
+}
+
+function openLeadsModal() {
+  renderLeadsList();
+  leadsModal.classList.remove("hidden");
+}
+
+function closeLeadsModal() {
+  leadsModal.classList.add("hidden");
+}
+
+function renderLeadsList() {
+  leadsListEl.innerHTML = "";
+  if (!leads.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.style.padding = "12px";
+    empty.textContent = "No leads captured yet. Use Contact Dealer after a preview to save a customer decision.";
+    leadsListEl.appendChild(empty);
+    return;
+  }
+
+  leads.forEach((lead) => {
+    const card = document.createElement("div");
+    card.className = "lead-card";
+    const when = new Date(lead.ts).toLocaleString();
+    const count = lead.shades ? lead.shades.length : 0;
+
+    card.innerHTML = `
+      <img class="thumb" src="${lead.snapshot}" alt="preview for ${lead.name}" />
+      <div class="meta">
+        <div class="name">${lead.name}</div>
+        <div class="phone">${lead.phone}</div>
+        <div class="when">${when}</div>
+      </div>
+      <div class="summary">
+        <span class="count">${count} wall${count === 1 ? "" : "s"}</span>
+        <span>View →</span>
+      </div>
+    `;
+
+    card.addEventListener("click", () => {
+      closeLeadsModal();
+      openLeadDetail(lead.id);
+    });
+
+    leadsListEl.appendChild(card);
+  });
+}
+
+function openLeadDetail(leadId) {
+  const lead = leads.find((l) => l.id === leadId);
+  if (!lead) return;
+  currentDetailLeadId = leadId;
+
+  const when = new Date(lead.ts).toLocaleString();
+  let html = `
+    <div class="info">
+      <div class="info-row"><span class="label">Name</span><strong>${lead.name}</strong></div>
+      <div class="info-row"><span class="label">Phone</span><strong>${lead.phone}</strong></div>
+      ${lead.email ? `<div class="info-row"><span class="label">Email</span>${lead.email}</div>` : ""}
+      <div class="info-row"><span class="label">Captured</span>${when}</div>
+      ${lead.notes ? `<div class="info-row"><span class="label">Notes</span><span>${lead.notes}</span></div>` : ""}
+    </div>
+    <div class="snapshot">
+      <img src="${lead.snapshot}" alt="saved preview for ${lead.name}" />
+    </div>
+    <div>
+      <h4 style="margin:4px 0 8px;font-size:0.82rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Chosen shades</h4>
+      <div class="walls">
+  `;
+
+  (lead.shades || []).forEach((s) => {
+    html += `
+      <div class="wall-row">
+        <span class="sw" style="background:${s.hex}"></span>
+        <span class="wall-label">${s.wall} — ${s.name} <span class="muted">${s.hex}</span></span>
+      </div>
+    `;
+  });
+
+  html += `</div></div>`;
+  leadDetailBody.innerHTML = html;
+
+  leadDetailModal.classList.remove("hidden");
+}
+
+function closeLeadDetail() {
+  leadDetailModal.classList.add("hidden");
+  currentDetailLeadId = null;
+}
+
+function deleteCurrentLead() {
+  if (!currentDetailLeadId) return;
+  leads = leads.filter((l) => l.id !== currentDetailLeadId);
+  saveLeads();
+  closeLeadDetail();
+  // if leads modal was the caller path, re-open it to refresh list
+  // for simplicity just show a toast; user can re-open inbox
+  showTransientToast("Lead deleted.");
+}
+
+function exportCurrentLeadPackage() {
+  if (!currentDetailLeadId) return;
+  const lead = leads.find((l) => l.id === currentDetailLeadId);
+  if (!lead) return;
+
+  // 1) download the snapshot png
+  const a = document.createElement("a");
+  a.href = lead.snapshot;
+  a.download = `lead-${lead.name.replace(/\s+/g, "-").toLowerCase()}-${new Date(lead.ts).toISOString().slice(0,10)}.png`;
+  a.click();
+
+  // 2) download a json sidecar
+  const meta = {
+    id: lead.id,
+    capturedAt: new Date(lead.ts).toISOString(),
+    customer: { name: lead.name, phone: lead.phone, email: lead.email || null, notes: lead.notes || null },
+    shades: lead.shades
+  };
+  const blob = new Blob([JSON.stringify(meta, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const b = document.createElement("a");
+  b.href = url;
+  b.download = `lead-${lead.name.replace(/\s+/g, "-").toLowerCase()}-${new Date(lead.ts).toISOString().slice(0,10)}.json`;
+  b.click();
+  URL.revokeObjectURL(url);
+}
+
+function clearAllLeads() {
+  if (!leads.length) return;
+  if (!confirm("Clear all locally stored leads? This cannot be undone.")) return;
+  leads = [];
+  saveLeads();
+  renderLeadsList();
+}
+
+/* ---- Basic session draft save/restore (Phase 2) ---- */
+
+function downscaleForDraft(img, maxWidth = 960) {
+  const ratio = Math.min(1, maxWidth / img.width);
+  const w = Math.round(img.width * ratio);
+  const h = Math.round(img.height * ratio);
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  c.getContext("2d").drawImage(img, 0, 0, w, h);
+  return c.toDataURL("image/jpeg", 0.82); // smaller than png for storage
+}
+
+function saveDraft() {
+  if (!state.originalImage || !state.zones.length) return;
+  try {
+    const payload = {
+      image: downscaleForDraft(state.originalImage),
+      zones: state.zones.map((z) => ({ label: z.label, shadeHex: z.shadeHex })),
+      savedAt: Date.now()
+    };
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
+  } catch (e) {
+    // storage full or private mode — ignore silently
+  }
+}
+
+function hasDraft() {
+  return !!localStorage.getItem(DRAFT_STORAGE_KEY);
+}
+
+function loadDraft() {
+  const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+  if (!raw) return false;
+  let payload;
+  try { payload = JSON.parse(raw); } catch { return false; }
+  if (!payload.image || !payload.zones || !payload.zones.length) return false;
+
+  const img = new Image();
+  img.onload = () => {
+    state.originalImage = img;
+    // init shades + default single zone from dominant (will be overwritten)
+    initializeShadesFromImage();
+
+    // override with saved zone choices (preserve order/labels)
+    // map saved hexes onto existing zones (or recreate)
+    const saved = payload.zones;
+    // first ensure we have enough zones
+    while (state.zones.length < saved.length && state.zones.length < MAX_ZONES) {
+      addWallTab();
+    }
+    saved.forEach((sv, i) => {
+      if (state.zones[i]) {
+        state.zones[i].label = sv.label || state.zones[i].label;
+        state.zones[i].shadeHex = sv.shadeHex;
+        // clear any prior manual/auto for a clean restore (user can re-brush)
+        state.zones[i].seed = null;
+        state.zones[i].manualEnabled = false;
+        if (state.zones[i].manualMask) state.zones[i].manualMask.fill(0);
+        invalidateZoneAuto(state.zones[i]);
+      }
+    });
+    // set first as active and pick a matching shade object if possible
+    setActiveZone(state.zones[0].id);
+    // refresh tabs and swatches
+    renderZoneTabs();
+    drawPreview();
+    showTransientToast("Restored previous draft session.");
+    updateRestoreDraftUI();
+    saveDraft(); // refresh timestamp
+  };
+  img.src = payload.image;
+  return true;
+}
+
+function updateRestoreDraftUI() {
+  if (!restoreDraftBtn) return;
+  const shouldShow = !state.originalImage && hasDraft();
+  restoreDraftBtn.style.display = shouldShow ? "" : "none";
+}
+
+/* ===================== End Phase 2 helpers ===================== */
 
 imageInput.addEventListener("change", (event) => {
   const file = event.target.files?.[0];
@@ -1570,3 +1963,57 @@ compareHandle.addEventListener("pointerup", () => { isDraggingSlider = false; })
 compareHandle.addEventListener("pointercancel", () => { isDraggingSlider = false; });
 
 exportBtn.addEventListener("click", exportPreview);
+
+// Phase 2 wiring
+loadLeads();
+updateRestoreDraftUI();
+if (leadsBtn) leadsBtn.disabled = false;
+
+if (contactBtn) contactBtn.addEventListener("click", openContactModal);
+if (leadsBtn) leadsBtn.addEventListener("click", openLeadsModal);
+if (restoreDraftBtn) restoreDraftBtn.addEventListener("click", () => {
+  if (loadDraft()) {
+    // loadDraft will hide via its own update call at end
+  }
+});
+
+if (closeContactBtn) closeContactBtn.addEventListener("click", closeContactModal);
+if (cancelContactBtn) cancelContactBtn.addEventListener("click", closeContactModal);
+if (contactForm) contactForm.addEventListener("submit", captureLeadFromForm);
+
+if (closeLeadsBtn) closeLeadsBtn.addEventListener("click", closeLeadsModal);
+if (closeLeads2Btn) closeLeads2Btn.addEventListener("click", closeLeadsModal);
+if (clearAllLeadsBtn) clearAllLeadsBtn.addEventListener("click", clearAllLeads);
+
+if (closeDetailBtn) closeDetailBtn.addEventListener("click", closeLeadDetail);
+if (deleteLeadBtn) deleteLeadBtn.addEventListener("click", deleteCurrentLead);
+if (exportLeadBtn) exportLeadBtn.addEventListener("click", exportCurrentLeadPackage);
+
+// Backdrop click to close
+[contactModal, leadsModal, leadDetailModal].forEach((m) => {
+  if (!m) return;
+  m.addEventListener("click", (e) => {
+    if (e.target === m) {
+      m.classList.add("hidden");
+      if (m === leadDetailModal) currentDetailLeadId = null;
+    }
+  });
+});
+
+// Escape key support
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (leadDetailModal && !leadDetailModal.classList.contains("hidden")) {
+      closeLeadDetail();
+      return;
+    }
+    if (leadsModal && !leadsModal.classList.contains("hidden")) {
+      closeLeadsModal();
+      return;
+    }
+    if (contactModal && !contactModal.classList.contains("hidden")) {
+      closeContactModal();
+      return;
+    }
+  }
+});

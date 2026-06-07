@@ -7,7 +7,7 @@ Date: 27 March 2026
 - Expansion principle: Only add new modules after measurable proof from the current module.
 
 2) Current Build Status
-Completed in the app:
+Completed in the app (Phase 1):
 - Room photo upload
 - Suggested shades (top 5)
 - Live recolor preview
@@ -18,12 +18,20 @@ Completed in the app:
 - Natural recolor mode (HSL)
 - Tap-to-lock wall selection
 - Multi-wall tabs with independent selection and color
-- Brush mask mode with brush size and clear/reset
+- Brush mask mode with brush size and clear/reset + erase + undo/redo
+- Edge feathering
 - Dark and high-contrast test shades (including black/charcoal)
+- E2E test coverage for core flows
+
+Phase 2 in progress:
+- Contact Dealer capture flow (name, phone, selected shades, preview snapshot)
+- Local (browser) leads inbox for captured leads
+- Lead package export (snapshot + metadata)
+- Basic session draft save/restore for preview workspace
 
 Validation objective now:
-- Confirm wall-tab behavior is reliable in real test images.
-- Confirm manual brush flow solves missed wall detection cases.
+- Complete a Contact Dealer capture from a finished preview.
+- Leads are persisted locally and exportable as a package.
 
 3) Product Scope Guardrails
 Build now:
@@ -44,17 +52,18 @@ Phase 0 - Product Contract (Done)
 - Lock scope: upload -> suggest -> preview -> compare -> share
 - Define phase success metrics
 
-Phase 1 - Decision Engine Hardening (In progress)
+Phase 1 - Decision Engine Hardening (Done)
 - Improve wall selection reliability
 - Add manual brush and per-wall editing controls
 - Improve auto wall choosing quality
 - Keep one-screen flow usable on mobile and desktop
 
-Phase 2 - Conversion Layer (Next)
+Phase 2 - Conversion Layer (In progress)
 - Add Contact Dealer action
 - Capture lead details: name, phone, selected shades, preview snapshot
 - Add simple local dealer inbox/list for captured leads
 - Add session save for draft previews
+- Lead package export (image + structured data) for dealer follow-up
 
 Phase 3 - Pilot Validation (After conversion layer)
 - Test with 3 to 5 local dealers
@@ -90,7 +99,7 @@ Phase 8 - Platform Expansion (Only after retention and monetization proof)
 - Customer-facing extended app flow
 - Marketplace mechanics and ranking logic
 
-5) Engineering Plan for Immediate Next Sprint (5 to 7 days)
+5) Engineering Plan for Immediate Next Sprint (5 to 7 days) — Phase 1 (historical)
 Day 1
 - Stabilize wall-tab + brush interactions
 - Add visual hint overlays while brushing
@@ -118,6 +127,14 @@ Day 6
 Day 7
 - Pilot-ready release packaging
 - Demo script and test checklist
+
+Phase 2 Sprint Focus (current)
+- Day 1-2: Contact Dealer button + modal form UI, auto-populate current shades/walls, snapshot capture on submit
+- Day 2-3: Persist leads to localStorage, render inbox list + lead detail modal, delete action, basic count badge
+- Day 3-4: Lead package export (download PNG snapshot + .json metadata file), copy-to-clipboard for quick share
+- Day 4-5: Session draft save/restore (downscaled original + zones config; offer resume on load or explicit load)
+- Day 5-6: Wire state (enable contact only when preview ready), mobile polish for modals/forms, success feedback
+- Day 6-7: Manual QA on capture flow, update docs + metrics, ensure E2E still passes, prepare pilot notes
 
 6) Success Metrics by Stage
 Phase 1 metrics:
@@ -149,11 +166,14 @@ Risk: Feature creep into full platform too early
 - Measure behavior before adding complexity
 - Preserve app speed over feature count
 
-9) Definition of Done for Current Milestone
-- Multi-wall tabs are stable
-- Brush + tap selection both work per tab
-- Black/dark shade testing clearly shows masking quality
-- Users can complete the full flow quickly and reliably
+9) Definition of Done for Current Milestone (Phase 2)
+- Contact Dealer button is available after a preview is ready
+- Lead form captures name + phone + current wall shades + a visual snapshot
+- Captured leads appear in a local inbox list (persisted across reloads)
+- User can view a lead, delete it, and export a lead package (PNG snapshot + JSON sidecar)
+- Basic draft save/restore works for an in-progress preview session
+- One-screen decision flow remains clean; conversion actions are progressive reveals
 
 10) Immediate Next Action
-- Implement brush erase mode + undo/redo, then add Contact Dealer capture.
+- Build the Contact Dealer modal + capture + local leads inbox + package export in the preview app.
+- Add minimal session draft persistence.

@@ -17,11 +17,14 @@
           <h1>Upload a room. Test colors. Decide fast.</h1>
           <p>
             This V1 is optimized for in-store demos: fast image upload,
-            instant shade preview, compare mode, and one-click share.
+            instant shade preview, compare mode, and Contact Dealer capture for real leads.
           </p>
           <div class="actions-row">
             <label class="button primary" for="imageInput">Upload Room Photo</label>
             <button id="exportBtn" class="button ghost" disabled>Share / Export</button>
+            <button id="contactBtn" class="button primary" disabled>Contact Dealer</button>
+            <button id="leadsBtn" class="button ghost" disabled>Leads <span id="leadsCount">0</span></button>
+            <button id="restoreDraftBtn" class="button ghost" style="display:none">Restore draft</button>
           </div>
           <input id="imageInput" type="file" accept="image/*" hidden />
         </div>
@@ -160,6 +163,88 @@
         </aside>
       </section>
     </main>
+
+    <!-- Phase 2: Conversion modals (local only, no backend) -->
+    <div id="contactModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="contactTitle">
+      <div class="modal-content">
+        <header class="modal-header">
+          <h3 id="contactTitle">Contact Dealer — Capture Lead</h3>
+          <button id="closeContactBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+        <form id="contactForm" autocomplete="off">
+          <div class="form-grid">
+            <label class="field">
+              <span>Customer name <span class="req">*</span></span>
+              <input id="leadName" type="text" required placeholder="Alex Rivera" />
+            </label>
+            <label class="field">
+              <span>Phone <span class="req">*</span></span>
+              <input id="leadPhone" type="tel" required placeholder="(555) 123-4567" />
+            </label>
+            <label class="field">
+              <span>Email (optional)</span>
+              <input id="leadEmail" type="email" placeholder="alex@email.com" />
+            </label>
+            <label class="field full">
+              <span>Notes (optional)</span>
+              <textarea id="leadNotes" rows="2" placeholder="Wants low-VOC, 2BR apartment, follow up this week"></textarea>
+            </label>
+          </div>
+
+          <div class="lead-summary">
+            <h4>Selected shades for this quote</h4>
+            <div id="leadShadesSummary" class="lead-shades"></div>
+          </div>
+
+          <div class="lead-snapshot">
+            <h4>Preview snapshot</h4>
+            <canvas id="leadSnapshotCanvas" width="640" height="360"></canvas>
+            <p class="muted tiny">This snapshot is stored locally with the lead for your follow-up.</p>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" id="cancelContactBtn" class="button ghost">Cancel</button>
+            <button type="submit" class="button primary">Save Lead</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="leadsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="leadsTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="leadsTitle">Leads Inbox <span class="muted">(local to this browser)</span></h3>
+          <button id="closeLeadsBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="leadsList" class="leads-list">
+          <!-- populated by JS: lead cards -->
+        </div>
+
+        <div class="modal-actions">
+          <button id="clearAllLeadsBtn" class="button tiny ghost">Clear all leads</button>
+          <button id="closeLeads2Btn" class="button ghost">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="leadDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+      <div class="modal-content">
+        <header class="modal-header">
+          <h3 id="detailTitle">Lead Details</h3>
+          <button id="closeDetailBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="leadDetailBody" class="lead-detail-body">
+          <!-- populated dynamically -->
+        </div>
+
+        <div class="modal-actions">
+          <button id="deleteLeadBtn" class="button ghost">Delete</button>
+          <button id="exportLeadBtn" class="button primary">Export Package</button>
+        </div>
+      </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.19.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/deeplab@0.2.1/dist/deeplab.min.js"></script>
