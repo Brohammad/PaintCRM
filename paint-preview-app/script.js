@@ -22,8 +22,11 @@ const edgeFeatherSlider = document.getElementById("edgeFeatherSlider");
 const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
 const compareCanvas = document.getElementById("compareCanvas");
+const brushCursorCanvas = document.getElementById("brushCursorCanvas");
+const compareHandle = document.getElementById("compareHandle");
 const previewCtx = previewCanvas.getContext("2d", { willReadFrequently: true });
 const compareCtx = compareCanvas.getContext("2d", { willReadFrequently: true });
+const brushCursorCtx = brushCursorCanvas.getContext("2d");
 
 const suggestionsEl = document.getElementById("suggestions");
 const compareSuggestionsEl = document.getElementById("compareSuggestions");
@@ -61,6 +64,8 @@ const state = {
   activeZoneId: null,
   nextZoneId: 1,
   isBrushing: false,
+  compareSliderX: 0.5,
+  brushCursor: null,
   mlModel: null,
   mlMask: null,
   mlLoading: false,
@@ -792,6 +797,7 @@ function createZone(label, shadeHex) {
     autoMask: null,
     autoSensitivity: null,
     manualMask: null,
+    manualEnabled: false,
     undoStack: [],
     redoStack: [],
     width: null,
@@ -808,6 +814,7 @@ function ensureZoneBuffers(zone, pixels) {
   zone.width = pixels.width;
   zone.height = pixels.height;
   zone.manualMask = new Uint8Array(zone.width * zone.height);
+  zone.manualEnabled = false;
   zone.undoStack = [];
   zone.redoStack = [];
   zone.autoMask = null;
@@ -944,7 +951,7 @@ function updateMaskStatus() {
     return;
   }
 
-  if (zone && hasManualMask(zone)) {
+  if (zone && zone.manualEnabled) {
     maskStatusEl.textContent = `${name}: manual brush mask`;
     maskStatusEl.classList.add("locked");
     return;
@@ -1012,7 +1019,7 @@ function setActiveZone(zoneId) {
 function getZoneMask(zone, pixels, sensitivity) {
   ensureZoneBuffers(zone, pixels);
 
-  if (hasManualMask(zone)) return zone.manualMask;
+  if (zone.manualEnabled) return zone.manualMask;
   if (zone.autoMask && zone.autoSensitivity === sensitivity) return zone.autoMask;
 
   const baseMask = zone.seed
@@ -1033,10 +1040,11 @@ function getZoneMask(zone, pixels, sensitivity) {
 
 function adoptCurrentMaskForManualEditing(zone, pixels, sensitivity) {
   ensureZoneBuffers(zone, pixels);
-  if (hasManualMask(zone)) return;
+  if (zone.manualEnabled) return;
 
   const baseMask = getZoneMask(zone, pixels, sensitivity);
   zone.manualMask.set(baseMask);
+  zone.manualEnabled = true;
   zone.seed = null;
   invalidateZoneAuto(zone);
 }
@@ -1148,19 +1156,76 @@ function drawPreview() {
   drawCompareIfEnabled();
 }
 
+function applyCompareSlider() {
+  const pct = (state.compareSliderX * 100).toFixed(1);
+  compareCanvas.style.clipPath = `inset(0 0 0 ${pct}%)`;
+  compareHandle.style.left = `${pct}%`;
+}
+
 function drawCompareIfEnabled() {
   if (!compareToggle.checked || !state.compareShade || !state.originalImage || !state.imageRect) {
     compareCanvas.classList.add("hidden");
+    compareHandle.classList.add("hidden");
     return;
   }
 
   compareCanvas.classList.remove("hidden");
+  compareHandle.classList.remove("hidden");
+  applyCompareSlider();
+
   const fit = state.imageRect;
   compareCtx.clearRect(0, 0, compareCanvas.width, compareCanvas.height);
   compareCtx.drawImage(state.originalImage, fit.dx, fit.dy, fit.drawWidth, fit.drawHeight);
 
   const pixels = state.originalPixels || compareCtx.getImageData(fit.dx, fit.dy, fit.drawWidth, fit.drawHeight);
   compareCtx.putImageData(renderTinted(pixels, state.compareShade.hex), fit.dx, fit.dy);
+}
+
+function drawBrushCursor(x, y) {
+  brushCursorCtx.clearRect(0, 0, brushCursorCanvas.width, brushCursorCanvas.height);
+  const radius = Number(brushSizeSlider.value);
+  const isErase = brushEraseToggle.checked;
+
+  brushCursorCtx.beginPath();
+  brushCursorCtx.arc(x, y, radius, 0, Math.PI * 2);
+
+  if (isErase) {
+    brushCursorCtx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+    brushCursorCtx.lineWidth = 1.5;
+    brushCursorCtx.setLineDash([5, 4]);
+    brushCursorCtx.stroke();
+    brushCursorCtx.setLineDash([]);
+    brushCursorCtx.beginPath();
+    brushCursorCtx.arc(x, y, radius, 0, Math.PI * 2);
+    brushCursorCtx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+    brushCursorCtx.lineWidth = 1;
+    brushCursorCtx.stroke();
+  } else {
+    brushCursorCtx.fillStyle = "rgba(183, 66, 31, 0.18)";
+    brushCursorCtx.fill();
+    brushCursorCtx.strokeStyle = "rgba(183, 66, 31, 0.75)";
+    brushCursorCtx.lineWidth = 1.5;
+    brushCursorCtx.stroke();
+  }
+
+  brushCursorCtx.beginPath();
+  brushCursorCtx.arc(x, y, 2, 0, Math.PI * 2);
+  brushCursorCtx.fillStyle = isErase ? "rgba(0,0,0,0.5)" : "rgba(183, 66, 31, 0.85)";
+  brushCursorCtx.fill();
+}
+
+function clearBrushCursor() {
+  state.brushCursor = null;
+  brushCursorCtx.clearRect(0, 0, brushCursorCanvas.width, brushCursorCanvas.height);
+}
+
+function onCursorMove(event) {
+  if (!brushMaskToggle.checked) return;
+  const rect = previewCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * (previewCanvas.width / rect.width);
+  const y = (event.clientY - rect.top) * (previewCanvas.height / rect.height);
+  state.brushCursor = { x, y };
+  drawBrushCursor(x, y);
 }
 
 function getLocalPoint(event) {
@@ -1186,6 +1251,7 @@ function handleCanvasPick(event) {
   zone.seed = pt;
   ensureZoneBuffers(zone, state.originalPixels);
   zone.manualMask.fill(0);
+  zone.manualEnabled = false;
   invalidateZoneAuto(zone);
 
   pickWallToggle.checked = false;
@@ -1212,6 +1278,7 @@ function paintBrush(point) {
     }
   }
 
+  zone.manualEnabled = true;
   zone.seed = null;
   invalidateZoneAuto(zone);
 }
@@ -1253,6 +1320,7 @@ function clearBrushMask() {
   ensureZoneBuffers(zone, state.originalPixels);
   pushMaskHistory(zone);
   zone.manualMask.fill(0);
+  zone.manualEnabled = false;
   zone.seed = null;
   invalidateZoneAuto(zone);
   updateMaskStatus();
@@ -1265,6 +1333,7 @@ function undoBrushMask() {
 
   zone.redoStack.push(new Uint8Array(zone.manualMask));
   zone.manualMask = zone.undoStack.pop();
+  zone.manualEnabled = true;
   zone.seed = null;
   invalidateZoneAuto(zone);
   updateMaskStatus();
@@ -1277,6 +1346,7 @@ function redoBrushMask() {
 
   zone.undoStack.push(new Uint8Array(zone.manualMask));
   zone.manualMask = zone.redoStack.pop();
+  zone.manualEnabled = true;
   zone.seed = null;
   invalidateZoneAuto(zone);
   updateMaskStatus();
@@ -1289,6 +1359,7 @@ function resetWallSelection() {
 
   zone.seed = null;
   if (zone.manualMask) zone.manualMask.fill(0);
+  zone.manualEnabled = false;
   zone.undoStack.length = 0;
   zone.redoStack.length = 0;
   invalidateZoneAuto(zone);
@@ -1366,11 +1437,27 @@ function handleImageUpload(file) {
   reader.readAsDataURL(file);
 }
 
-function exportPreview() {
+async function exportPreview() {
   if (!state.originalImage) return;
+  const dataUrl = previewCanvas.toDataURL("image/png");
+
+  if (navigator.canShare) {
+    try {
+      const resp = await fetch(dataUrl);
+      const blob = await resp.blob();
+      const file = new File([blob], `paint-preview-${Date.now()}.png`, { type: "image/png" });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "My Paint Preview" });
+        return;
+      }
+    } catch {
+      // fall through to download
+    }
+  }
+
   const link = document.createElement("a");
   link.download = `paint-preview-${Date.now()}.png`;
-  link.href = previewCanvas.toDataURL("image/png");
+  link.href = dataUrl;
   link.click();
 }
 
@@ -1430,12 +1517,19 @@ brushMaskToggle.addEventListener("change", () => {
   if (brushMaskToggle.checked) {
     pickWallToggle.checked = false;
     canvasWrap.classList.remove("picking");
+    brushCursorCanvas.classList.remove("hidden");
+  } else {
+    brushCursorCanvas.classList.add("hidden");
+    clearBrushCursor();
   }
   canvasWrap.classList.toggle("brushing", brushMaskToggle.checked);
   updateMaskStatus();
 });
 
-brushEraseToggle.addEventListener("change", updateMaskStatus);
+brushEraseToggle.addEventListener("change", () => {
+  if (state.brushCursor) drawBrushCursor(state.brushCursor.x, state.brushCursor.y);
+  updateMaskStatus();
+});
 
 resetWallBtn.addEventListener("click", resetWallSelection);
 clearBrushBtn.addEventListener("click", clearBrushMask);
@@ -1447,7 +1541,32 @@ removeZoneBtn.addEventListener("click", removeActiveWallTab);
 previewCanvas.addEventListener("click", handleCanvasPick);
 previewCanvas.addEventListener("pointerdown", onBrushDown);
 previewCanvas.addEventListener("pointermove", onBrushMove);
+previewCanvas.addEventListener("pointermove", onCursorMove);
+previewCanvas.addEventListener("pointerleave", clearBrushCursor);
 window.addEventListener("pointerup", onBrushUp);
 window.addEventListener("pointercancel", onBrushUp);
+
+brushSizeSlider.addEventListener("input", () => {
+  if (state.brushCursor) drawBrushCursor(state.brushCursor.x, state.brushCursor.y);
+});
+
+let isDraggingSlider = false;
+
+compareHandle.addEventListener("pointerdown", (e) => {
+  isDraggingSlider = true;
+  compareHandle.setPointerCapture(e.pointerId);
+  e.stopPropagation();
+});
+
+compareHandle.addEventListener("pointermove", (e) => {
+  if (!isDraggingSlider) return;
+  const rect = canvasWrap.getBoundingClientRect();
+  state.compareSliderX = clamp((e.clientX - rect.left) / rect.width, 0.03, 0.97);
+  applyCompareSlider();
+  e.stopPropagation();
+});
+
+compareHandle.addEventListener("pointerup", () => { isDraggingSlider = false; });
+compareHandle.addEventListener("pointercancel", () => { isDraggingSlider = false; });
 
 exportBtn.addEventListener("click", exportPreview);

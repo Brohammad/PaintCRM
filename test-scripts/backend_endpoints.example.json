@@ -1,0 +1,15 @@
+[
+  {
+    "name": "Health",
+    "method": "GET",
+    "path": "/health",
+    "expected_status": 200,
+    "contains": "ok"
+  },
+  {
+    "name": "Leads List",
+    "method": "GET",
+    "path": "/api/leads",
+    "expected_status": 200
+  }
+]

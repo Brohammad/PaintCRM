@@ -21,7 +21,7 @@
           </p>
           <div class="actions-row">
             <label class="button primary" for="imageInput">Upload Room Photo</label>
-            <button id="exportBtn" class="button ghost" disabled>Export Preview</button>
+            <button id="exportBtn" class="button ghost" disabled>Share / Export</button>
           </div>
           <input id="imageInput" type="file" accept="image/*" hidden />
         </div>
@@ -60,6 +60,8 @@
           <div class="canvas-wrap" id="canvasWrap">
             <canvas id="previewCanvas" width="1280" height="720"></canvas>
             <canvas id="compareCanvas" width="1280" height="720" class="hidden"></canvas>
+            <canvas id="brushCursorCanvas" width="1280" height="720" class="hidden"></canvas>
+            <div id="compareHandle" class="compare-handle hidden"></div>
             <p id="canvasHint">Upload a room image to start previewing shades.</p>
           </div>
         </article>
