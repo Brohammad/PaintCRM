@@ -1,4 +1,8 @@
 server/node_modules/
 server/paintcrm.db
+server/paintcrm.db-shm
+server/paintcrm.db-wal
 server/.env
 *.db
+*.db-shm
+*.db-wal
