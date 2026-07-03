@@ -23,5 +23,7 @@ afterAll(async () => {
 
 // Clean tables between tests
 global.cleanDatabase = async () => {
-  await pool.query('TRUNCATE TABLE events, leads, tenants, shades RESTART IDENTITY CASCADE');
+  await pool.query(
+    'TRUNCATE TABLE preview_sessions, leads, sites, customers, events, tenants, shades RESTART IDENTITY CASCADE'
+  );
 };

@@ -57,6 +57,33 @@ const leadDetailBody = document.getElementById("leadDetailBody");
 const deleteLeadBtn = document.getElementById("deleteLeadBtn");
 const exportLeadBtn = document.getElementById("exportLeadBtn");
 
+// Phase 5 CRM elements
+const customersBtn = document.getElementById("customersBtn");
+const customersModal = document.getElementById("customersModal");
+const customersListEl = document.getElementById("customersList");
+const customersSignInPrompt = document.getElementById("customersSignInPrompt");
+const customersPanel = document.getElementById("customersPanel");
+const customerSearchInput = document.getElementById("customerSearchInput");
+const newCustomerBtn = document.getElementById("newCustomerBtn");
+const closeCustomersBtn = document.getElementById("closeCustomersBtn");
+const closeCustomers2Btn = document.getElementById("closeCustomers2Btn");
+const customerDetailModal = document.getElementById("customerDetailModal");
+const customerDetailBody = document.getElementById("customerDetailBody");
+const closeCustomerDetailBtn = document.getElementById("closeCustomerDetailBtn");
+const closeCustomerDetail2Btn = document.getElementById("closeCustomerDetail2Btn");
+const addSiteBtn = document.getElementById("addSiteBtn");
+const newCustomerModal = document.getElementById("newCustomerModal");
+const newCustomerForm = document.getElementById("newCustomerForm");
+const closeNewCustomerBtn = document.getElementById("closeNewCustomerBtn");
+const cancelNewCustomerBtn = document.getElementById("cancelNewCustomerBtn");
+const leadCustomerField = document.getElementById("leadCustomerField");
+const leadSiteField = document.getElementById("leadSiteField");
+const leadCustomerSelect = document.getElementById("leadCustomerSelect");
+const leadSiteSelect = document.getElementById("leadSiteSelect");
+
+let crmCustomers = [];
+let currentCustomerId = null;
+
 const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
 const compareCanvas = document.getElementById("compareCanvas");
@@ -141,6 +168,13 @@ let pilotFirstActionTs = null;
 let dealerSettings = { shopName: "", dealerName: "", phone: "" };
 
 async function loadShadeCatalog() {
+  if (getApiToken()) {
+    const { data, error } = await apiRequest("GET", "/api/shades");
+    if (!error && data?.shades?.length) {
+      SHADE_CATALOG = data.shades;
+      return;
+    }
+  }
   try {
     const res = await fetch("shades.json");
     if (!res.ok) throw new Error("fetch failed");
@@ -148,6 +182,22 @@ async function loadShadeCatalog() {
   } catch {
     SHADE_CATALOG = FALLBACK_SWATCHES;
   }
+}
+
+function getCurrentCostEstimate() {
+  const zone = getActiveZone();
+  if (!zone) return null;
+  const entry = catalogEntry({ hex: zone.shadeHex });
+  if (!entry?.pricePerL) return null;
+  const litres = Math.ceil((ROOM_SQ_M * 2) / COVERAGE_SQ_M_PER_L);
+  return {
+    litres,
+    pricePerL: entry.pricePerL,
+    totalInr: litres * entry.pricePerL,
+    roomSqM: ROOM_SQ_M,
+    shadeName: entry.name,
+    brand: entry.brand || "",
+  };
 }
 
 function findShadeInCatalog(hex) {
@@ -172,6 +222,15 @@ function updateCostEstimate(shade) {
   costLitresEl.textContent = `~${litres}L for a standard room (2 coats)`;
   costTotalEl.textContent = `Est. ₹${total.toLocaleString("en-IN")} @ ₹${entry.pricePerL}/L`;
   costEstimateEl.classList.remove("hidden");
+}
+
+function generateLeadId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 function clamp(v, min, max) {
@@ -1710,6 +1769,7 @@ function openContactModal() {
 
   contactModal.classList.remove("hidden");
   trackContactOpened(); // Phase 3
+  populateLeadCrmFields();
   setTimeout(() => leadNameInput.focus(), 0);
 }
 
@@ -1734,15 +1794,20 @@ function captureLeadFromForm(e) {
   // snapshot from the modal canvas (already rendered)
   const snapDataUrl = leadSnapshotCanvas.toDataURL("image/png");
 
+  const costEstimate = getCurrentCostEstimate();
+
   const lead = {
-    id: "lead_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+    id: generateLeadId(),
     ts: Date.now(),
     name,
     phone,
     email: (leadEmailInput.value || "").trim(),
     notes: (leadNotesInput.value || "").trim(),
     shades,
-    snapshot: snapDataUrl
+    snapshot: snapDataUrl,
+    costEstimate: costEstimate || null,
+    customerId: leadCustomerSelect?.value || null,
+    siteId: leadSiteSelect?.value || null,
   };
 
   leads.unshift(lead); // newest first
@@ -1896,9 +1961,13 @@ function exportCurrentLeadPackage() {
   URL.revokeObjectURL(url);
 }
 
-function clearAllLeads() {
+async function clearAllLeads() {
   if (!leads.length) return;
-  if (!confirm("Clear all locally stored leads? This cannot be undone.")) return;
+  if (!confirm("Clear all leads on this device? Synced server leads will also be deleted.")) return;
+  const toDelete = [...leads];
+  if (getApiToken()) {
+    await Promise.all(toDelete.map((l) => deleteLeadFromServer(l.id)));
+  }
   leads = [];
   saveLeads();
   renderLeadsList();
@@ -2093,7 +2162,7 @@ async function loadApiSession() {
   if (error || !data?.tenant) { clearApiToken(); updateServerSyncUI(); return; }
   apiTenant = data.tenant;
   updateServerSyncUI();
-  await syncLeadsFromServer();
+  await completeServerSessionRestore();
 }
 
 async function loginToServer(email, password) {
@@ -2102,7 +2171,7 @@ async function loginToServer(email, password) {
   setApiToken(data.token);
   apiTenant = data.tenant;
   updateServerSyncUI();
-  await syncLeadsFromServer();
+  await completeServerSessionRestore();
   return { ok: true };
 }
 
@@ -2112,7 +2181,26 @@ async function registerOnServer(shopName, dealerName, phone, email, password) {
   setApiToken(data.token);
   apiTenant = data.tenant;
   updateServerSyncUI();
+  await completeServerSessionRestore();
   return { ok: true };
+}
+
+async function completeServerSessionRestore() {
+  await syncDealerFromServer();
+  await syncLeadsFromServer();
+  await loadShadeCatalog();
+}
+
+async function syncDealerFromServer() {
+  if (!getApiToken()) return;
+  const { data, error } = await apiRequest("GET", "/api/dealer");
+  if (error || !data?.dealer) return;
+  const d = data.dealer;
+  saveDealerSettings({
+    shopName: d.shopName || "",
+    dealerName: d.dealerName || "",
+    phone: d.phone || "",
+  });
 }
 
 function logoutFromServer() {
@@ -2132,6 +2220,10 @@ async function syncLeadToServer(lead) {
     notes: lead.notes || "",
     shades: lead.shades || [],
     snapshotB64: lead.snapshot || "",
+    costEstimate: lead.costEstimate || null,
+    customerId: lead.customerId || null,
+    siteId: lead.siteId || null,
+    pilotSessionId: pilotSessionId || null,
     createdAt: new Date(lead.ts).toISOString(),
   });
 }
@@ -2140,6 +2232,12 @@ async function syncLeadToServer(lead) {
 async function deleteLeadFromServer(leadId) {
   if (!getApiToken()) return;
   await apiRequest("DELETE", `/api/leads/${leadId}`);
+}
+
+async function fetchLeadSnapshotFromServer(leadId) {
+  const { data, error } = await apiRequest("GET", `/api/leads/${leadId}`);
+  if (error || !data?.lead) return "";
+  return data.lead.snapshotB64 || "";
 }
 
 // Fetch server leads and merge with local (server wins on conflict by ts)
@@ -2156,17 +2254,35 @@ async function syncLeadsFromServer() {
     email: l.email || "",
     notes: l.notes || "",
     shades: l.shades || [],
-    snapshot: "",  // snapshot not included in list endpoint
+    costEstimate: l.costEstimate || null,
+    customerId: l.customerId || null,
+    siteId: l.siteId || null,
+    snapshot: "",
   }));
 
-  // Merge: keep local lead if it has a snapshot, otherwise take server version
   const localById = new Map(leads.map((l) => [l.id, l]));
   for (const sl of serverLeads) {
     const existing = localById.get(sl.id);
-    if (!existing) localById.set(sl.id, sl);
-    // if exists locally with snapshot, keep local (it has richer data)
+    if (!existing) {
+      sl.snapshot = await fetchLeadSnapshotFromServer(sl.id);
+      localById.set(sl.id, sl);
+      continue;
+    }
+    if (!existing.snapshot) {
+      existing.snapshot = await fetchLeadSnapshotFromServer(sl.id);
+    }
+    if (sl.ts > existing.ts) {
+      existing.name = sl.name;
+      existing.phone = sl.phone;
+      existing.email = sl.email;
+      existing.notes = sl.notes;
+      existing.shades = sl.shades.length ? sl.shades : existing.shades;
+      existing.costEstimate = sl.costEstimate || existing.costEstimate;
+      existing.ts = sl.ts;
+    }
+    localById.set(sl.id, existing);
   }
-  // Also push any local leads to server that the server doesn't know about
+
   const serverIds = new Set(serverLeads.map((l) => l.id));
   for (const local of leads) {
     if (!serverIds.has(local.id)) syncLeadToServer(local);
@@ -2257,6 +2373,219 @@ async function handleServerAuthSubmit(mode) {
   closeSettingsModal();
 }
 
+/* ===================== Phase 5: CRM Lite ===================== */
+
+async function syncPreviewSessionToServer(sessionType, extra = {}) {
+  if (!getApiToken() || !pilotSessionId) return;
+  await apiRequest("POST", "/api/sessions", {
+    pilotSessionId,
+    sessionType,
+    summary: extra.summary || "",
+    shades: extra.shades || [],
+    name: dealerSettings.dealerName || "",
+    phone: dealerSettings.phone || "",
+  }).catch(() => { /* best-effort */ });
+}
+
+async function fetchCustomers(q = "") {
+  if (!getApiToken()) return [];
+  const path = q ? `/api/customers?q=${encodeURIComponent(q)}` : "/api/customers";
+  const { data, error } = await apiRequest("GET", path);
+  if (error || !data?.customers) return [];
+  crmCustomers = data.customers;
+  return crmCustomers;
+}
+
+async function populateLeadCrmFields() {
+  const signedIn = !!getApiToken();
+  if (leadCustomerField) leadCustomerField.classList.toggle("hidden", !signedIn);
+  if (leadSiteField) leadSiteField.classList.toggle("hidden", !signedIn);
+  if (!signedIn || !leadCustomerSelect) return;
+
+  const customers = await fetchCustomers();
+  leadCustomerSelect.innerHTML = `<option value="">New customer (auto-create from phone)</option>`;
+  customers.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = `${c.name} — ${c.phone}`;
+    leadCustomerSelect.appendChild(opt);
+  });
+  if (leadSiteSelect) {
+    leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
+  }
+}
+
+async function populateLeadSites(customerId) {
+  if (!leadSiteSelect || !customerId) {
+    if (leadSiteSelect) leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
+    return;
+  }
+  const { data, error } = await apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`);
+  leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
+  if (error || !data?.sites) return;
+  data.sites.forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = s.name;
+    leadSiteSelect.appendChild(opt);
+  });
+}
+
+function openCustomersModal() {
+  if (!customersModal) return;
+  const signedIn = !!getApiToken();
+  if (customersSignInPrompt) customersSignInPrompt.style.display = signedIn ? "none" : "block";
+  if (customersPanel) customersPanel.style.display = signedIn ? "block" : "none";
+  customersModal.classList.remove("hidden");
+  if (signedIn) renderCustomersList();
+}
+
+function closeCustomersModal() {
+  if (customersModal) customersModal.classList.add("hidden");
+}
+
+async function renderCustomersList(q = "") {
+  if (!customersListEl) return;
+  customersListEl.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  const customers = await fetchCustomers(q);
+  customersListEl.innerHTML = "";
+  if (!customers.length) {
+    customersListEl.innerHTML = `<p class="muted" style="padding:12px;">No customers yet. Save a lead or tap + New.</p>`;
+    return;
+  }
+  customers.forEach((c) => {
+    const card = document.createElement("div");
+    card.className = "customer-card";
+    card.innerHTML = `
+      <div>
+        <div class="name">${c.name}</div>
+        <div class="phone">${c.phone}</div>
+      </div>
+      <div class="stats">${c.leadCount || 0} leads<br>${c.siteCount || 0} sites</div>
+    `;
+    card.addEventListener("click", () => {
+      closeCustomersModal();
+      openCustomerDetail(c.id);
+    });
+    customersListEl.appendChild(card);
+  });
+}
+
+async function openCustomerDetail(customerId) {
+  if (!customerDetailModal || !customerDetailBody) return;
+  currentCustomerId = customerId;
+  customerDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  customerDetailModal.classList.remove("hidden");
+
+  const [customerRes, sitesRes, timelineRes] = await Promise.all([
+    apiRequest("GET", `/api/customers/${customerId}`),
+    apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`),
+    apiRequest("GET", `/api/customers/${customerId}/timeline`),
+  ]);
+
+  const customer = customerRes.data?.customer;
+  const sites = sitesRes.data?.sites || [];
+  const timeline = timelineRes.data?.timeline || [];
+  if (!customer) {
+    customerDetailBody.innerHTML = `<p class="muted">Customer not found.</p>`;
+    return;
+  }
+
+  const typeLabel = customer.customerType === "contractor" ? "Contractor" : "End customer";
+  let html = `
+    <div class="info">
+      <div class="info-row"><span class="label">Name</span><strong>${customer.name}</strong></div>
+      <div class="info-row"><span class="label">Phone</span><strong>${customer.phone}</strong></div>
+      ${customer.email ? `<div class="info-row"><span class="label">Email</span>${customer.email}</div>` : ""}
+      <div class="info-row"><span class="label">Type</span>${typeLabel}</div>
+      ${customer.notes ? `<div class="info-row"><span class="label">Notes</span>${customer.notes}</div>` : ""}
+    </div>
+    <h4 style="margin:16px 0 8px;font-size:0.82rem;color:var(--muted);text-transform:uppercase;">Sites / Projects</h4>
+    <div class="sites-list">
+      ${sites.length ? sites.map((s) => `<span class="site-chip">${s.name}</span>`).join("") : `<span class="muted tiny">No sites yet</span>`}
+    </div>
+    <h4 style="margin:16px 0 8px;font-size:0.82rem;color:var(--muted);text-transform:uppercase;">Timeline</h4>
+    <div class="timeline-list">
+  `;
+
+  if (!timeline.length) {
+    html += `<p class="muted tiny">No activity yet.</p>`;
+  } else {
+    timeline.forEach((item) => {
+      const when = new Date(item.ts).toLocaleString();
+      const kind = (item.kind || "").replace(/_/g, " ");
+      html += `
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div>
+            <div class="kind">${kind}</div>
+            <div><strong>${item.title || "Activity"}</strong></div>
+            <div class="when">${when}${item.siteName ? ` · ${item.siteName}` : ""}</div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  html += `</div>`;
+  customerDetailBody.innerHTML = html;
+  const titleEl = document.getElementById("customerDetailTitle");
+  if (titleEl) titleEl.textContent = customer.name;
+}
+
+function closeCustomerDetail() {
+  if (customerDetailModal) customerDetailModal.classList.add("hidden");
+  currentCustomerId = null;
+}
+
+function openNewCustomerModal() {
+  if (newCustomerModal) newCustomerModal.classList.remove("hidden");
+}
+
+function closeNewCustomerModal() {
+  if (newCustomerModal) newCustomerModal.classList.add("hidden");
+  if (newCustomerForm) newCustomerForm.reset();
+}
+
+async function handleNewCustomerSubmit(e) {
+  e.preventDefault();
+  const name = (document.getElementById("newCustomerName")?.value || "").trim();
+  const phone = (document.getElementById("newCustomerPhone")?.value || "").trim();
+  const email = (document.getElementById("newCustomerEmail")?.value || "").trim();
+  const customerType = document.getElementById("newCustomerType")?.value || "end_customer";
+  const notes = (document.getElementById("newCustomerNotes")?.value || "").trim();
+  if (!name || !phone) return;
+
+  const { error } = await apiRequest("POST", "/api/customers", {
+    name, phone, email, notes, customerType,
+  });
+  if (error) {
+    showTransientToast(error);
+    return;
+  }
+  closeNewCustomerModal();
+  showTransientToast(`Customer ${name} saved.`);
+  renderCustomersList(customerSearchInput?.value || "");
+}
+
+async function handleAddSite() {
+  if (!currentCustomerId) return;
+  const name = prompt("Site / project name (e.g. 2BR Apartment — Kochi):");
+  if (!name?.trim()) return;
+  const address = prompt("Address (optional):") || "";
+  const { error } = await apiRequest("POST", "/api/sites", {
+    customerId: currentCustomerId,
+    name: name.trim(),
+    address: address.trim(),
+  });
+  if (error) {
+    showTransientToast(error);
+    return;
+  }
+  showTransientToast("Site added.");
+  openCustomerDetail(currentCustomerId);
+}
+
 /* ===================== Phase 3: Pilot Validation Analytics ===================== */
 
 function generateEventId() {
@@ -2290,6 +2619,7 @@ function startPilotSession() {
   pilotFirstShadeTs = null;
   pilotFirstActionTs = null;
   trackEvent("session_start", { dealer: dealerSettings.shopName || "" });
+  syncPreviewSessionToServer("session_start", { summary: "Preview session started" });
 }
 
 function trackShadeSelected(shade) {
@@ -2298,6 +2628,10 @@ function trackShadeSelected(shade) {
   if (!pilotFirstShadeTs) pilotFirstShadeTs = Date.now();
   const ttFirstShade = isFirst ? pilotFirstShadeTs - (pilotSessionStart || pilotFirstShadeTs) : null;
   trackEvent("shade_selected", { hex: shade.hex, name: shade.name, brand: shade.brand || "", ttFirstShade });
+  syncPreviewSessionToServer("shade_selected", {
+    summary: `Selected ${shade.name}`,
+    shades: [{ hex: shade.hex, name: shade.name, brand: shade.brand || "" }],
+  });
 }
 
 function trackShareExport() {
@@ -2321,52 +2655,24 @@ function trackContactSaved(leadId) {
   trackEvent("contact_saved", { leadId, ttAction });
 }
 
-function renderAnalytics() {
-  const panel = document.getElementById("analyticsPanel");
-  if (!panel) return;
-
-  const now = Date.now();
-  const MS_30D = 30 * 24 * 60 * 60 * 1000;
-  const recent = analyticsEvents.filter((e) => now - e.ts < MS_30D);
-
-  const startEvents = recent.filter((e) => e.type === "session_start");
-  const totalSessions = startEvents.length;
-
-  // avg time to first shade pick (ms → seconds)
-  const firstShadeEvents = recent.filter((e) => e.type === "shade_selected" && e.data.ttFirstShade != null);
-  const avgShadeMs = firstShadeEvents.length
-    ? firstShadeEvents.reduce((s, e) => s + e.data.ttFirstShade, 0) / firstShadeEvents.length
-    : 0;
-  const avgShadeSec = Math.round(avgShadeMs / 1000);
-
-  // sessions that had a contact_saved event
-  const contactSessionIds = new Set(recent.filter((e) => e.type === "contact_saved").map((e) => e.sessionId));
-  const contactCount = contactSessionIds.size;
-  const contactRate = totalSessions ? Math.round((contactCount / totalSessions) * 100) : 0;
-
-  // sessions that had a share_exported event
-  const shareSessionIds = new Set(recent.filter((e) => e.type === "share_exported").map((e) => e.sessionId));
-  const shareCount = shareSessionIds.size;
-  const shareRate = totalSessions ? Math.round((shareCount / totalSessions) * 100) : 0;
-
-  // sessions per day, last 7 days
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now);
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - i);
-    const dayEnd = d.getTime() + 86400000;
-    const count = startEvents.filter((e) => e.ts >= d.getTime() && e.ts < dayEnd).length;
-    days.push({ label: dayNames[d.getDay()], count, isToday: i === 0 });
-  }
-  const maxDay = Math.max(1, ...days.map((d) => d.count));
+function buildAnalyticsHtml(metrics) {
+  const {
+    totalSessions,
+    avgShadeSec,
+    contactCount,
+    contactRate,
+    shareCount,
+    shareRate,
+    days,
+    maxDay,
+    sourceNote,
+  } = metrics;
 
   const emptyMsg = totalSessions === 0
     ? `<p class="analytics-empty">No pilot sessions yet.<br>Analytics start when a customer uploads their first room photo.</p>`
     : "";
 
-  panel.innerHTML = `
+  return `
     <div class="analytics-grid">
       <div class="analytics-card">
         <div class="a-label">Sessions (30d)</div>
@@ -2400,8 +2706,115 @@ function renderAnalytics() {
       `).join("")}
     </div>
     ${emptyMsg}
-    <p class="muted tiny" style="margin-top:12px;">Data is stored locally on this device. Export via Settings → Download Analytics JSON.</p>
+    <p class="muted tiny" style="margin-top:12px;">${sourceNote}</p>
   `;
+}
+
+function buildLast7DayBars(startEvents) {
+  const now = Date.now();
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const dayEnd = d.getTime() + 86400000;
+    const count = startEvents.filter((e) => e.ts >= d.getTime() && e.ts < dayEnd).length;
+    days.push({ label: dayNames[d.getDay()], count, isToday: i === 0 });
+  }
+  return { days, maxDay: Math.max(1, ...days.map((d) => d.count)) };
+}
+
+function buildAnalyticsHtmlFromLocal() {
+  const now = Date.now();
+  const MS_30D = 30 * 24 * 60 * 60 * 1000;
+  const recent = analyticsEvents.filter((e) => now - e.ts < MS_30D);
+
+  const startEvents = recent.filter((e) => e.type === "session_start");
+  const totalSessions = startEvents.length;
+
+  const firstShadeEvents = recent.filter((e) => e.type === "shade_selected" && e.data.ttFirstShade != null);
+  const avgShadeMs = firstShadeEvents.length
+    ? firstShadeEvents.reduce((s, e) => s + e.data.ttFirstShade, 0) / firstShadeEvents.length
+    : 0;
+  const avgShadeSec = Math.round(avgShadeMs / 1000);
+
+  const contactSessionIds = new Set(recent.filter((e) => e.type === "contact_saved").map((e) => e.sessionId));
+  const contactCount = contactSessionIds.size;
+  const contactRate = totalSessions ? Math.round((contactCount / totalSessions) * 100) : 0;
+
+  const shareSessionIds = new Set(recent.filter((e) => e.type === "share_exported").map((e) => e.sessionId));
+  const shareCount = shareSessionIds.size;
+  const shareRate = totalSessions ? Math.round((shareCount / totalSessions) * 100) : 0;
+
+  const { days, maxDay } = buildLast7DayBars(startEvents);
+
+  return buildAnalyticsHtml({
+    totalSessions,
+    avgShadeSec,
+    contactCount,
+    contactRate,
+    shareCount,
+    shareRate,
+    days,
+    maxDay,
+    sourceNote: "Data is stored locally on this device. Sign in to see combined metrics from all devices.",
+  });
+}
+
+function buildAnalyticsHtmlFromServer(summary) {
+  const totalSessions = summary.sessions || 0;
+  const avgShadeSec = summary.avgDecisionMs ? Math.round(summary.avgDecisionMs / 1000) : 0;
+  const contactCount = summary.contacts || 0;
+  const contactRate = summary.contactRate || 0;
+  const shareCount = summary.shares || 0;
+  const shareRate = summary.shareRate || 0;
+
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dailyMap = new Map();
+  for (const row of summary.daily || []) {
+    const key = String(row.day).slice(0, 10);
+    dailyMap.set(key, parseInt(row.sessions, 10) || 0);
+  }
+
+  const now = new Date();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    days.push({ label: dayNames[d.getDay()], count: dailyMap.get(key) || 0, isToday: i === 0 });
+  }
+  const maxDay = Math.max(1, ...days.map((d) => d.count));
+
+  return buildAnalyticsHtml({
+    totalSessions,
+    avgShadeSec,
+    contactCount,
+    contactRate,
+    shareCount,
+    shareRate,
+    days,
+    maxDay,
+    sourceNote: "Data from server — combined across all signed-in devices.",
+  });
+}
+
+async function renderAnalytics() {
+  const panel = document.getElementById("analyticsPanel");
+  if (!panel) return;
+
+  if (getApiToken()) {
+    panel.innerHTML = `<p class="muted tiny">Loading analytics…</p>`;
+    const { data, error } = await apiRequest("GET", "/api/events/summary");
+    if (!error && data) {
+      panel.innerHTML = buildAnalyticsHtmlFromServer(data);
+      return;
+    }
+  }
+
+  panel.innerHTML = buildAnalyticsHtmlFromLocal();
 }
 
 function exportAnalyticsJson() {
@@ -2659,6 +3072,28 @@ if (clearAllLeadsBtn) clearAllLeadsBtn.addEventListener("click", clearAllLeads);
 if (closeDetailBtn) closeDetailBtn.addEventListener("click", closeLeadDetail);
 if (deleteLeadBtn) deleteLeadBtn.addEventListener("click", deleteCurrentLead);
 if (exportLeadBtn) exportLeadBtn.addEventListener("click", exportCurrentLeadPackage);
+
+// Phase 5: CRM
+if (customersBtn) customersBtn.addEventListener("click", openCustomersModal);
+if (closeCustomersBtn) closeCustomersBtn.addEventListener("click", closeCustomersModal);
+if (closeCustomers2Btn) closeCustomers2Btn.addEventListener("click", closeCustomersModal);
+if (newCustomerBtn) newCustomerBtn.addEventListener("click", openNewCustomerModal);
+if (closeNewCustomerBtn) closeNewCustomerBtn.addEventListener("click", closeNewCustomerModal);
+if (cancelNewCustomerBtn) cancelNewCustomerBtn.addEventListener("click", closeNewCustomerModal);
+if (newCustomerForm) newCustomerForm.addEventListener("submit", handleNewCustomerSubmit);
+if (closeCustomerDetailBtn) closeCustomerDetailBtn.addEventListener("click", closeCustomerDetail);
+if (closeCustomerDetail2Btn) closeCustomerDetail2Btn.addEventListener("click", closeCustomerDetail);
+if (addSiteBtn) addSiteBtn.addEventListener("click", handleAddSite);
+if (customerSearchInput) {
+  customerSearchInput.addEventListener("input", () => {
+    renderCustomersList(customerSearchInput.value.trim());
+  });
+}
+if (leadCustomerSelect) {
+  leadCustomerSelect.addEventListener("change", () => {
+    populateLeadSites(leadCustomerSelect.value);
+  });
+}
 
 // Phase 3: leads modal tab buttons
 const leadsTabBtn = document.getElementById("leadsTabBtn");

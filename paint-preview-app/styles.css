@@ -938,3 +938,78 @@ body {
   background: #e6f9f0;
   color: #1a8a52;
 }
+
+/* Phase 5: CRM Lite */
+.crm-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.crm-search {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.customer-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+
+.customer-card:hover { border-color: var(--accent); }
+
+.customer-card .name { font-weight: 600; }
+.customer-card .phone { color: var(--muted); font-size: 0.85rem; }
+.customer-card .stats { font-size: 0.78rem; color: var(--muted); text-align: right; }
+
+.timeline-list { margin-top: 16px; }
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.timeline-item:last-child { border-bottom: none; }
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: 5px;
+}
+
+.timeline-item .when { font-size: 0.78rem; color: var(--muted); }
+.timeline-item .kind {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.sites-list { margin: 12px 0; }
+
+.site-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  margin: 0 6px 6px 0;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 0.82rem;
+}

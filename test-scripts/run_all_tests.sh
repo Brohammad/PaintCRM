@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="$ROOT_DIR/paint-preview-app"
 APP_URL="${APP_URL:-http://localhost:8080}"
-BACKEND_BASE_URL="${BACKEND_BASE_URL:-http://localhost:3000}"
+BACKEND_BASE_URL="${BACKEND_BASE_URL:-http://localhost:3001}"
 BACKEND_CONFIG="${BACKEND_ENDPOINTS_JSON:-}"
 SKIP_BACKEND="${SKIP_BACKEND:-0}"
 

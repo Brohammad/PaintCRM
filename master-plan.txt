@@ -7,31 +7,20 @@ Date: 27 March 2026
 - Expansion principle: Only add new modules after measurable proof from the current module.
 
 2) Current Build Status
-Completed in the app (Phase 1):
-- Room photo upload
-- Suggested shades (top 5)
-- Live recolor preview
-- Before/after toggle
-- Compare mode
-- Export preview
-- Smart wall masking (software)
-- Natural recolor mode (HSL)
-- Tap-to-lock wall selection
-- Multi-wall tabs with independent selection and color
-- Brush mask mode with brush size and clear/reset + erase + undo/redo
-- Edge feathering
-- Dark and high-contrast test shades (including black/charcoal)
-- E2E test coverage for core flows
+Phases 0–4 are complete. Next up: Phase 5 (CRM Lite) after pilot dealers show repeat backend usage.
 
-Phase 2 in progress:
-- Contact Dealer capture flow (name, phone, selected shades, preview snapshot)
-- Local (browser) leads inbox for captured leads
-- Lead package export (snapshot + metadata)
-- Basic session draft save/restore for preview workspace
+Completed (Phases 1–3):
+- Full decision engine, conversion layer, and pilot validation analytics (see Phase Roadmap below)
 
-Validation objective now:
-- Complete a Contact Dealer capture from a finished preview.
-- Leads are persisted locally and exportable as a package.
+Phase 4 complete (Jul 2026):
+- PostgreSQL backend with auth, leads, shades, dealer profile, funnel events
+- End-to-end frontend sync: leads, snapshots, dealer profile, server analytics, shade catalog
+- Docker, CI/CD, monitoring stack (Prometheus/Grafana)
+
+Current validation objective:
+- Run pilot with 3–5 dealers on the full stack (signed in, server sync enabled)
+- Measure repeat sessions and contact/share rates via server analytics
+- Gate Phase 5 (CRM Lite) on evidence of repeated real usage
 
 3) Product Scope Guardrails
 Build now:
@@ -69,7 +58,7 @@ Phase 2 - Conversion Layer (Done)
 - Basic cost estimator (litres + INR estimate for standard room, 2 coats)
 - localStorage safety guards (graceful fallback when storage full)
 
-Phase 3 - Pilot Validation (IN PROGRESS — started Jun 7 2026)
+Phase 3 - Pilot Validation (Done — infra complete; dealer pilot ongoing)
 - Test with 3 to 5 local dealers
 - Measure:
   - Time to customer decision
@@ -85,34 +74,41 @@ Phase 3 - Pilot Validation (IN PROGRESS — started Jun 7 2026)
   - Settings modal: configure dealer name/shop/phone, export or clear analytics
   - Dealer info embedded in all exported lead JSON packages
 
-Phase 4 - Backend Foundation (IN PROGRESS — started Jun 7 2026)
+Phase 4 - Backend Foundation (Done — Jul 2026)
 - Basic auth and tenant model ✓
 - Lead APIs and preview metadata storage ✓
 - Shade and dealer catalog APIs ✓
 - Event tracking for funnel analytics ✓
-- Phase 4 backend built (server/ — Node.js + Express + SQLite):
+- Phase 4 backend built (server/ — Node.js + Express + PostgreSQL):
   - POST /api/auth/register + POST /api/auth/login + GET /api/auth/me (JWT, 30-day token, bcrypt)
   - Tenant model: shop_name, dealer_name, phone, email — multi-tenant scoped
-  - GET/POST/DELETE /api/leads — per-tenant lead CRUD with snapshot storage
+  - GET/POST/DELETE /api/leads + GET /api/leads/:id — per-tenant lead CRUD with snapshot storage
   - GET /api/shades — catalog API seeded from shades.json (63 shades), searchable by ?q=
   - GET/PUT /api/dealer — dealer profile API
   - POST /api/events — funnel event ingestion (session_start, shade_selected, share_exported, contact_opened, contact_saved)
   - GET /api/events/summary — 30-day funnel metrics: sessions, contact rate, share rate, avg decision time, 7-day bar data
   - Express also serves paint-preview-app/ as static files (run one port: 3001)
+  - Docker Compose stack: app + Postgres + Redis + Prometheus + Grafana
+  - GitHub Actions CI: lint, test, Docker build
 - Frontend API sync layer (graceful degradation — full offline mode preserved):
   - apiRequest() helper with Bearer auth header
-  - syncLeadToServer() — leads POST to backend on capture
-  - deleteLeadFromServer() — backend delete on local delete
-  - syncLeadsFromServer() — on login, merges server leads into local store
+  - syncLeadToServer() — leads POST to backend on capture (includes cost estimate)
+  - deleteLeadFromServer() — backend delete on local delete; clear-all propagates
+  - syncLeadsFromServer() — on login/register, merges server leads; fetches snapshots via GET /api/leads/:id
+  - syncDealerFromServer() — pulls dealer profile from server on session restore
   - syncEventToServer() — every analytics event also POSTed to backend (best-effort)
   - apiUpdateDealer() — dealer settings synced on save
   - loginToServer() / registerOnServer() / logoutFromServer()
-  - Server Sync section added to Settings modal: Sign In / Create Account tabs, status chip
+  - Pilot Analytics uses GET /api/events/summary when signed in
+  - Shade catalog loads from /api/shades when signed in (falls back to shades.json offline)
+  - Server Sync section in Settings modal + standalone /login page
 
-Phase 5 - CRM Lite
-- Customer CRUD
-- Site/project basics
-- Link preview sessions to customer/site timeline
+Phase 5 - CRM Lite (IN PROGRESS — Jul 2026)
+- Customer CRUD (end_customer / contractor types)
+- Site/project basics per customer
+- Preview session timeline linked to customer
+- Auto-link leads to customers by phone on server sync
+- Frontend Customers modal with timeline and site management
 
 Phase 6 - Commercial Modules
 - Quote -> order basic flow

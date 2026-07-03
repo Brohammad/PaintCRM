@@ -1,10 +1,11 @@
 {
   "name": "paintcrm-server",
-  "version": "1.1.0",
-  "description": "PaintCRM Backend — Enterprise Grade",
+  "version": "1.2.0",
+  "description": "PaintCRM Backend — CRM Lite (Phase 5)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:with-migrate": "npm run migrate:up && node index.js",
     "dev": "node --watch index.js",
     "test": "jest --coverage",
     "test:watch": "jest --watch",

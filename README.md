@@ -18,10 +18,22 @@ A paint decision engine that helps customers choose a wall color confidently in 
 
 ### Option A — With backend (Phase 4, recommended)
 
+**Docker (easiest):**
+
 ```bash
+cp server/.env.example server/.env
+docker-compose up -d
+# → http://localhost:3001
+```
+
+**Local Node + PostgreSQL:**
+
+```bash
+# Create a database, then set DATABASE_URL in server/.env (see server/.env.example)
 cd server
 npm install
-npm start
+npm run migrate:up
+npm run start:with-migrate   # or: npm start (after migrations)
 # → http://localhost:3001
 ```
 
@@ -76,7 +88,7 @@ Open [http://localhost:8080](http://localhost:8080). Everything works offline vi
 - **Analytics export** — Settings → Download Analytics JSON for pilot review
 - **Clear analytics** — reset event log before handing device to a new dealer
 
-### Phase 4 — Backend Foundation (in progress)
+### Phase 4 — Backend Foundation (done)
 
 A full Node.js + Express + PostgreSQL backend in `server/` with:
 
@@ -98,6 +110,10 @@ A full Node.js + Express + PostgreSQL backend in `server/` with:
 
 **Frontend sync (graceful degradation):**
 - All leads sync to the server automatically when signed in; deletes propagate too
+- Cross-device lead restore fetches preview snapshots via `GET /api/leads/:id`
+- Dealer profile pulled from server on sign-in
+- Pilot Analytics dashboard uses server funnel metrics when signed in
+- Shade catalog loads from `/api/shades` when signed in (falls back to `shades.json` offline)
 - Every analytics event is sent to `/api/events` in addition to being stored locally
 - Dealer settings saved via `PUT /api/dealer` on form submit
 - On startup, a stored token is validated and leads are merged from the server
@@ -107,6 +123,22 @@ A full Node.js + Express + PostgreSQL backend in `server/` with:
 - Sign In / Create Account tabs
 - Live connection status chip (green "Connected" / grey "Not connected")
 - Logout
+
+### Phase 5 — CRM Lite (in progress)
+
+When signed in to the backend:
+
+| Endpoint | What it does |
+|----------|-------------|
+| `GET/POST/PUT/DELETE /api/customers` | Customer CRUD (search via `?q=`) |
+| `GET /api/customers/:id/timeline` | Merged leads + preview sessions for a customer |
+| `GET/POST/PUT/DELETE /api/sites` | Site/project per customer (`?customerId=`) |
+| `POST /api/sessions` | Record preview session events on the timeline |
+
+- **Customers** button in the app — browse, search, add customers
+- **Lead capture** auto-creates or links customers by phone; optional site link
+- **Timeline** on each customer — session starts, shade picks, lead captures
+- Leads still work offline; CRM requires server sign-in
 
 ---
 
@@ -123,7 +155,8 @@ A full Node.js + Express + PostgreSQL backend in `server/` with:
    - Lead saved locally and synced to `POST /api/leads`.
 9. **Leads → Export Package** — downloads snapshot PNG + `.json` (with dealer info).
 10. **Leads → Pilot Analytics** — review KPI cards and bar chart.
-11. After the pilot: **Settings → Download Analytics JSON** for the full event log.
+11. **Customers** — view customer timeline (auto-created from leads when signed in).
+12. After the pilot: **Settings → Download Analytics JSON** for the full event log.
 
 ---
 
@@ -166,8 +199,8 @@ curl -s -X POST http://localhost:3001/api/auth/register \
 | 1 | Done | Decision Engine — masking, recolor, compare, share |
 | 2 | Done | Conversion layer — shade catalog, search, lead capture, inbox, cost estimator, session drafts |
 | 3 | Done | Pilot validation — analytics engine, dealer branding, KPI dashboard |
-| 4 | In progress | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking |
-| 5 | Planned | CRM Lite — customer CRUD, site/project tracking, session timeline |
+| 4 | Done | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking, Docker, CI |
+| 5 | In progress | CRM Lite — customer CRUD, sites/projects, session timeline (server sync) |
 | 6+ | Future | Quoting, inventory, credit ledger, AI recommendations |
 
 See [`master-plan.txt`](master-plan.txt) for the full execution plan with sprint breakdowns and success metrics.
