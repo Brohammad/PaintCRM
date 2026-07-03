@@ -80,4 +80,71 @@ describe('Customers API', () => {
     expect(timelineRes.body.timeline.length).toBeGreaterThanOrEqual(1);
     expect(timelineRes.body.timeline[0].kind).toBe('lead_captured');
   });
+
+  it('should require name and phone on create', async () => {
+    const res = await request(app)
+      .post('/api/customers')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'No Phone' });
+    expect(res.status).toBe(400);
+  });
+
+  it('should reject an invalid customerType', async () => {
+    const res = await request(app)
+      .post('/api/customers')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Bad Type', phone: '555-0002', customerType: 'alien' });
+    expect(res.status).toBe(400);
+  });
+
+  it('should get, update, and delete a customer', async () => {
+    const createRes = await request(app)
+      .post('/api/customers')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Editable', phone: '555-5555' });
+    const id = createRes.body.customer.id;
+
+    const getRes = await request(app)
+      .get(`/api/customers/${id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(getRes.status).toBe(200);
+
+    const updateRes = await request(app)
+      .put(`/api/customers/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Edited Name', phone: '555-5555', customerType: 'contractor' });
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.customer.name).toBe('Edited Name');
+    expect(updateRes.body.customer.customerType).toBe('contractor');
+
+    const deleteRes = await request(app)
+      .delete(`/api/customers/${id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(deleteRes.status).toBe(200);
+
+    const getAgain = await request(app)
+      .get(`/api/customers/${id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(getAgain.status).toBe(404);
+  });
+
+  it('should search customers by query', async () => {
+    await request(app)
+      .post('/api/customers')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Searchable Person', phone: '555-7001' });
+
+    const res = await request(app)
+      .get('/api/customers?q=Searchable')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers.some((c) => c.name === 'Searchable Person')).toBe(true);
+  });
+
+  it('should 404 timeline for unknown customer', async () => {
+    const res = await request(app)
+      .get('/api/customers/00000000-0000-4000-8000-000000000000/timeline')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
 });

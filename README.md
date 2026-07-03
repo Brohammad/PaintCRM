@@ -124,7 +124,7 @@ A full Node.js + Express + PostgreSQL backend in `server/` with:
 - Live connection status chip (green "Connected" / grey "Not connected")
 - Logout
 
-### Phase 5 — CRM Lite (in progress)
+### Phase 5 — CRM Lite (done)
 
 When signed in to the backend:
 
@@ -135,10 +135,12 @@ When signed in to the backend:
 | `GET/POST/PUT/DELETE /api/sites` | Site/project per customer (`?customerId=`) |
 | `POST /api/sessions` | Record preview session events on the timeline |
 
-- **Customers** button in the app — browse, search, add customers
-- **Lead capture** auto-creates or links customers by phone; optional site link
+- **Customers** button in the app — browse, search, add, **edit, and delete** customers
+- **Sites/projects** — add via a form on the customer detail view
+- **Lead capture** auto-creates or links customers by phone; optional customer + site link
 - **Timeline** on each customer — session starts, shade picks, lead captures
-- Leads still work offline; CRM requires server sign-in
+- **Lead → customer** — jump from a lead to its linked customer profile
+- **Offline cache** — last-synced customers stay viewable offline; writes require sign-in
 
 ---
 
@@ -200,7 +202,8 @@ curl -s -X POST http://localhost:3001/api/auth/register \
 | 2 | Done | Conversion layer — shade catalog, search, lead capture, inbox, cost estimator, session drafts |
 | 3 | Done | Pilot validation — analytics engine, dealer branding, KPI dashboard |
 | 4 | Done | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking, Docker, CI |
-| 5 | In progress | CRM Lite — customer CRUD, sites/projects, session timeline (server sync) |
-| 6+ | Future | Quoting, inventory, credit ledger, AI recommendations |
+| 5 | Done | CRM Lite — customer CRUD, sites/projects, session timeline (server sync) |
+| 6 | Planned | Quoting, inventory, credit ledger |
+| 7+ | Future | AI palette recommendations, dealer assistant |
 
 See [`master-plan.txt`](master-plan.txt) for the full execution plan with sprint breakdowns and success metrics.

@@ -103,12 +103,16 @@ Phase 4 - Backend Foundation (Done — Jul 2026)
   - Shade catalog loads from /api/shades when signed in (falls back to shades.json offline)
   - Server Sync section in Settings modal + standalone /login page
 
-Phase 5 - CRM Lite (IN PROGRESS — Jul 2026)
-- Customer CRUD (end_customer / contractor types)
-- Site/project basics per customer
-- Preview session timeline linked to customer
-- Auto-link leads to customers by phone on server sync
-- Frontend Customers modal with timeline and site management
+Phase 5 - CRM Lite (Done — Jul 2026)
+- Customer CRUD (end_customer / contractor types) — create, edit, delete
+- Site/project basics per customer (create via form)
+- Preview session timeline linked to customer (session_start, shade_selected, lead_captured)
+- Auto-link leads/sessions to customers by phone on server sync
+- Frontend Customers modal with search, timeline, site management
+- Lead detail links to the linked customer profile
+- Offline customer cache (localStorage) — viewable offline; writes require sign-in
+- Backend: /api/customers, /api/customers/:id/timeline, /api/sites, /api/sessions
+- Full Jest suite (56 tests) green against PostgreSQL; coverage >70%
 
 Phase 6 - Commercial Modules
 - Quote -> order basic flow

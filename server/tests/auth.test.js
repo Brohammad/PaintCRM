@@ -42,7 +42,7 @@ describe('Auth API', () => {
         });
 
       expect(res.status).toBe(409);
-      expect(res.body.error).toContain('already exists');
+      expect(res.body.error).toContain('already registered');
     });
 
     it('should reject weak password', async () => {

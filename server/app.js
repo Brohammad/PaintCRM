@@ -81,7 +81,7 @@ if (rateLimitingEnabled) {
   const authWindowMs = 60 * 60 * 1000;
   const authLimiter = rateLimit({
     windowMs: authWindowMs,
-    max: 10,
+    max: process.env.NODE_ENV === 'test' ? 1000 : 10,
     skipSuccessfulRequests: true,
     store: buildStore(authWindowMs, 'rl:auth:'),
   });

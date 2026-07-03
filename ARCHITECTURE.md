@@ -1272,7 +1272,7 @@ export default function () {
 | 2 | Done | localStorage persistence, lead CRUD, draft save, shade catalog |
 | 3 | Done | Analytics event system, local dashboard, dealer branding |
 | 4 | **Done** | PostgreSQL backend with connection pooling, JWT auth, Docker containerization, CI/CD, monitoring stack |
-| 5 | **In progress** | Customer CRM (CRUD), site/project model, preview session linked to customer timeline |
+| 5 | **Done** | Customer CRM (CRUD), site/project model, preview session linked to customer timeline |
 | 6 | Planned | Quote → order flow, inventory stock status, credit ledger, payment reminders |
 | 7 | Planned | AI palette recommendations (style/mood/season), dealer assistant prompts (LLM) |
 | 8 | Future | Contractor assignment, customer-facing app, marketplace mechanics |
@@ -1289,4 +1289,4 @@ export default function () {
 
 ---
 
-*Last updated: Jul 3, 2026 — Phase 4 complete; Phase 5 next*
+*Last updated: Jul 3, 2026 — Phase 5 (CRM Lite) complete; Phase 6 next*

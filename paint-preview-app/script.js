@@ -80,9 +80,19 @@ const leadCustomerField = document.getElementById("leadCustomerField");
 const leadSiteField = document.getElementById("leadSiteField");
 const leadCustomerSelect = document.getElementById("leadCustomerSelect");
 const leadSiteSelect = document.getElementById("leadSiteSelect");
+const deleteCustomerBtn = document.getElementById("deleteCustomerBtn");
+const editCustomerBtn = document.getElementById("editCustomerBtn");
+const newCustomerTitle = document.getElementById("newCustomerTitle");
+const saveCustomerBtn = document.getElementById("saveCustomerBtn");
+const siteModal = document.getElementById("siteModal");
+const siteForm = document.getElementById("siteForm");
+const closeSiteBtn = document.getElementById("closeSiteBtn");
+const cancelSiteBtn = document.getElementById("cancelSiteBtn");
 
 let crmCustomers = [];
 let currentCustomerId = null;
+let currentCustomerObj = null;
+let editingCustomerId = null;
 
 const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
@@ -158,6 +168,9 @@ const DEALER_STORAGE_KEY = "paintcrm_dealer_v1";
 // Phase 4: backend API
 const API_TOKEN_KEY = "paintcrm_api_token_v1";
 const API_TENANT_KEY = "paintcrm_api_tenant_v1";
+
+// Phase 5: CRM offline cache
+const CUSTOMERS_CACHE_KEY = "paintcrm_customers_cache_v1";
 let apiTenant = null; // { id, shopName, dealerName, phone, email }
 
 let analyticsEvents = [];
@@ -1913,9 +1926,43 @@ function openLeadDetail(leadId) {
   });
 
   html += `</div></div>`;
+
+  if (getApiToken()) {
+    html += `
+      <div style="margin-top:14px;">
+        <button type="button" id="viewCustomerFromLeadBtn" class="button ghost tiny">View customer profile →</button>
+      </div>
+    `;
+  }
+
   leadDetailBody.innerHTML = html;
 
+  const viewCustomerBtn = document.getElementById("viewCustomerFromLeadBtn");
+  if (viewCustomerBtn) {
+    viewCustomerBtn.addEventListener("click", () => openCustomerFromLead(lead));
+  }
+
   leadDetailModal.classList.remove("hidden");
+}
+
+async function openCustomerFromLead(lead) {
+  if (!getApiToken()) return;
+  let customerId = lead.customerId;
+
+  // Fallback: locally captured lead not yet linked — match by phone on the server
+  if (!customerId && lead.phone) {
+    const { data } = await apiRequest("GET", `/api/customers?q=${encodeURIComponent(lead.phone)}`);
+    const match = (data?.customers || []).find((c) => c.phone === lead.phone);
+    customerId = match?.id || null;
+  }
+
+  if (!customerId) {
+    showTransientToast("No linked customer yet. Sync this lead first.");
+    return;
+  }
+
+  closeLeadDetail();
+  openCustomerDetail(customerId);
 }
 
 function closeLeadDetail() {
@@ -2132,8 +2179,13 @@ function setApiToken(t) {
   try { localStorage.setItem(API_TOKEN_KEY, t); } catch { /* storage full */ }
 }
 function clearApiToken() {
-  try { localStorage.removeItem(API_TOKEN_KEY); localStorage.removeItem(API_TENANT_KEY); } catch { /* nothing */ }
+  try {
+    localStorage.removeItem(API_TOKEN_KEY);
+    localStorage.removeItem(API_TENANT_KEY);
+    localStorage.removeItem(CUSTOMERS_CACHE_KEY); // don't leave CRM data after logout
+  } catch { /* nothing */ }
   apiTenant = null;
+  crmCustomers = [];
 }
 
 async function apiRequest(method, path, body) {
@@ -2387,13 +2439,46 @@ async function syncPreviewSessionToServer(sessionType, extra = {}) {
   }).catch(() => { /* best-effort */ });
 }
 
+function saveCustomersCache(list) {
+  try { safeLsSet(CUSTOMERS_CACHE_KEY, JSON.stringify(list || [])); } catch { /* storage full */ }
+}
+
+function loadCustomersCache() {
+  try {
+    const raw = localStorage.getItem(CUSTOMERS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasCustomersCache() {
+  return loadCustomersCache().length > 0;
+}
+
+// Fetch customers from server; falls back to (and refreshes) the local cache.
 async function fetchCustomers(q = "") {
-  if (!getApiToken()) return [];
+  if (!getApiToken()) {
+    const cached = loadCustomersCache();
+    return filterCustomersLocally(cached, q);
+  }
   const path = q ? `/api/customers?q=${encodeURIComponent(q)}` : "/api/customers";
   const { data, error } = await apiRequest("GET", path);
-  if (error || !data?.customers) return [];
+  if (error || !data?.customers) {
+    // Offline / server error — serve from cache so CRM stays usable
+    return filterCustomersLocally(loadCustomersCache(), q);
+  }
   crmCustomers = data.customers;
+  if (!q) saveCustomersCache(crmCustomers); // only cache the full list
   return crmCustomers;
+}
+
+function filterCustomersLocally(list, q) {
+  const needle = (q || "").trim().toLowerCase();
+  if (!needle) return list;
+  return list.filter((c) =>
+    [c.name, c.phone, c.email].some((v) => (v || "").toLowerCase().includes(needle))
+  );
 }
 
 async function populateLeadCrmFields() {
@@ -2434,10 +2519,13 @@ async function populateLeadSites(customerId) {
 function openCustomersModal() {
   if (!customersModal) return;
   const signedIn = !!getApiToken();
-  if (customersSignInPrompt) customersSignInPrompt.style.display = signedIn ? "none" : "block";
-  if (customersPanel) customersPanel.style.display = signedIn ? "block" : "none";
+  const showPanel = signedIn || hasCustomersCache();
+  if (customersSignInPrompt) customersSignInPrompt.style.display = showPanel ? "none" : "block";
+  if (customersPanel) customersPanel.style.display = showPanel ? "block" : "none";
+  // + New requires a live connection (writes go to server)
+  if (newCustomerBtn) newCustomerBtn.style.display = signedIn ? "" : "none";
   customersModal.classList.remove("hidden");
-  if (signedIn) renderCustomersList();
+  if (showPanel) renderCustomersList();
 }
 
 function closeCustomersModal() {
@@ -2477,6 +2565,23 @@ async function openCustomerDetail(customerId) {
   customerDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
   customerDetailModal.classList.remove("hidden");
 
+  const online = !!getApiToken();
+  const canManage = online;
+  if (deleteCustomerBtn) deleteCustomerBtn.style.display = canManage ? "" : "none";
+  if (editCustomerBtn) editCustomerBtn.style.display = canManage ? "" : "none";
+  if (addSiteBtn) addSiteBtn.style.display = canManage ? "" : "none";
+
+  // Offline: render from the cached list only
+  if (!online) {
+    const cached = loadCustomersCache().find((c) => c.id === customerId);
+    if (!cached) {
+      customerDetailBody.innerHTML = `<p class="muted">Sign in to view this customer's full profile.</p>`;
+      return;
+    }
+    renderCustomerDetail(cached, [], [], { offline: true });
+    return;
+  }
+
   const [customerRes, sitesRes, timelineRes] = await Promise.all([
     apiRequest("GET", `/api/customers/${customerId}`),
     apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`),
@@ -2491,6 +2596,11 @@ async function openCustomerDetail(customerId) {
     return;
   }
 
+  renderCustomerDetail(customer, sites, timeline, { offline: false });
+}
+
+function renderCustomerDetail(customer, sites, timeline, { offline }) {
+  currentCustomerObj = customer;
   const typeLabel = customer.customerType === "contractor" ? "Contractor" : "End customer";
   let html = `
     <div class="info">
@@ -2508,7 +2618,9 @@ async function openCustomerDetail(customerId) {
     <div class="timeline-list">
   `;
 
-  if (!timeline.length) {
+  if (offline) {
+    html += `<p class="muted tiny">Showing cached profile. Sign in to load sites and full timeline.</p>`;
+  } else if (!timeline.length) {
     html += `<p class="muted tiny">No activity yet.</p>`;
   } else {
     timeline.forEach((item) => {
@@ -2538,13 +2650,30 @@ function closeCustomerDetail() {
   currentCustomerId = null;
 }
 
-function openNewCustomerModal() {
-  if (newCustomerModal) newCustomerModal.classList.remove("hidden");
+function openNewCustomerModal(customer = null) {
+  if (!newCustomerModal) return;
+  editingCustomerId = customer?.id || null;
+  if (newCustomerTitle) newCustomerTitle.textContent = customer ? "Edit Customer" : "New Customer";
+  if (saveCustomerBtn) saveCustomerBtn.textContent = customer ? "Update Customer" : "Save Customer";
+
+  const nameEl = document.getElementById("newCustomerName");
+  const phoneEl = document.getElementById("newCustomerPhone");
+  const emailEl = document.getElementById("newCustomerEmail");
+  const typeEl = document.getElementById("newCustomerType");
+  const notesEl = document.getElementById("newCustomerNotes");
+  if (nameEl) nameEl.value = customer?.name || "";
+  if (phoneEl) phoneEl.value = customer?.phone || "";
+  if (emailEl) emailEl.value = customer?.email || "";
+  if (typeEl) typeEl.value = customer?.customerType || "end_customer";
+  if (notesEl) notesEl.value = customer?.notes || "";
+
+  newCustomerModal.classList.remove("hidden");
 }
 
 function closeNewCustomerModal() {
   if (newCustomerModal) newCustomerModal.classList.add("hidden");
   if (newCustomerForm) newCustomerForm.reset();
+  editingCustomerId = null;
 }
 
 async function handleNewCustomerSubmit(e) {
@@ -2556,32 +2685,79 @@ async function handleNewCustomerSubmit(e) {
   const notes = (document.getElementById("newCustomerNotes")?.value || "").trim();
   if (!name || !phone) return;
 
-  const { error } = await apiRequest("POST", "/api/customers", {
-    name, phone, email, notes, customerType,
-  });
+  const payload = { name, phone, email, notes, customerType };
+  const { error } = editingCustomerId
+    ? await apiRequest("PUT", `/api/customers/${editingCustomerId}`, payload)
+    : await apiRequest("POST", "/api/customers", payload);
+
   if (error) {
     showTransientToast(error);
     return;
   }
+
+  const wasEditing = editingCustomerId;
   closeNewCustomerModal();
-  showTransientToast(`Customer ${name} saved.`);
-  renderCustomersList(customerSearchInput?.value || "");
+  showTransientToast(`Customer ${name} ${wasEditing ? "updated" : "saved"}.`);
+  await fetchCustomers(); // refresh cache
+  if (wasEditing && currentCustomerId === wasEditing) {
+    openCustomerDetail(wasEditing);
+  } else {
+    renderCustomersList(customerSearchInput?.value || "");
+  }
 }
 
-async function handleAddSite() {
+function editCurrentCustomer() {
+  if (currentCustomerObj) openNewCustomerModal(currentCustomerObj);
+}
+
+async function deleteCurrentCustomer() {
   if (!currentCustomerId) return;
-  const name = prompt("Site / project name (e.g. 2BR Apartment — Kochi):");
-  if (!name?.trim()) return;
-  const address = prompt("Address (optional):") || "";
+  const name = currentCustomerObj?.name || "this customer";
+  if (!confirm(`Delete ${name}? Their sites and timeline links will be removed. Captured leads are kept.`)) return;
+
+  const { error } = await apiRequest("DELETE", `/api/customers/${currentCustomerId}`);
+  if (error) {
+    showTransientToast(error);
+    return;
+  }
+  showTransientToast("Customer deleted.");
+  closeCustomerDetail();
+  await fetchCustomers();
+  openCustomersModal();
+}
+
+function openSiteModal() {
+  if (!siteModal || !currentCustomerId) return;
+  if (siteForm) siteForm.reset();
+  siteModal.classList.remove("hidden");
+  setTimeout(() => document.getElementById("siteName")?.focus(), 0);
+}
+
+function closeSiteModal() {
+  if (siteModal) siteModal.classList.add("hidden");
+}
+
+async function handleSiteSubmit(e) {
+  e.preventDefault();
+  if (!currentCustomerId) return;
+  const name = (document.getElementById("siteName")?.value || "").trim();
+  const address = (document.getElementById("siteAddress")?.value || "").trim();
+  const status = document.getElementById("siteStatus")?.value || "active";
+  const notes = (document.getElementById("siteNotes")?.value || "").trim();
+  if (!name) return;
+
   const { error } = await apiRequest("POST", "/api/sites", {
     customerId: currentCustomerId,
-    name: name.trim(),
-    address: address.trim(),
+    name,
+    address,
+    status,
+    notes,
   });
   if (error) {
     showTransientToast(error);
     return;
   }
+  closeSiteModal();
   showTransientToast("Site added.");
   openCustomerDetail(currentCustomerId);
 }
@@ -3083,7 +3259,12 @@ if (cancelNewCustomerBtn) cancelNewCustomerBtn.addEventListener("click", closeNe
 if (newCustomerForm) newCustomerForm.addEventListener("submit", handleNewCustomerSubmit);
 if (closeCustomerDetailBtn) closeCustomerDetailBtn.addEventListener("click", closeCustomerDetail);
 if (closeCustomerDetail2Btn) closeCustomerDetail2Btn.addEventListener("click", closeCustomerDetail);
-if (addSiteBtn) addSiteBtn.addEventListener("click", handleAddSite);
+if (addSiteBtn) addSiteBtn.addEventListener("click", openSiteModal);
+if (editCustomerBtn) editCustomerBtn.addEventListener("click", editCurrentCustomer);
+if (deleteCustomerBtn) deleteCustomerBtn.addEventListener("click", deleteCurrentCustomer);
+if (siteForm) siteForm.addEventListener("submit", handleSiteSubmit);
+if (closeSiteBtn) closeSiteBtn.addEventListener("click", closeSiteModal);
+if (cancelSiteBtn) cancelSiteBtn.addEventListener("click", closeSiteModal);
 if (customerSearchInput) {
   customerSearchInput.addEventListener("input", () => {
     renderCustomersList(customerSearchInput.value.trim());
