@@ -9,3 +9,6 @@ server/.env
 *.db
 *.db-shm
 *.db-wal
+
+# Local Cursor MCP config (contains API tokens)
+.cursor/mcp.json

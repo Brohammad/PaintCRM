@@ -30,7 +30,12 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      scriptSrc: ["'self'"],
+      // 'unsafe-inline' is needed for the login page + the auth-gate bootstrap
+      // scripts (static HTML, so no per-request nonce). jsdelivr serves the
+      // optional TensorFlow.js wall-assist libraries.
+      scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
+      // TensorFlow.js downloads its wasm backend + segmentation model weights.
+      connectSrc: ["'self'", 'https://cdn.jsdelivr.net', 'https://storage.googleapis.com', 'https://tfhub.dev'],
       imgSrc: ["'self'", 'data:', 'blob:'],
     },
   },

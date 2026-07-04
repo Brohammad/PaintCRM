@@ -23,6 +23,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Public URL(s) allowed by CORS. Comma-separate to add a custom domain,
+      # e.g. https://paintcrm-5k17.onrender.com,https://paintcrm.brohammad.tech
+      - key: ALLOWED_ORIGINS
+        value: https://paintcrm-5k17.onrender.com
       # Auto-generated secure secret (>=32 chars satisfies the production guard).
       - key: JWT_SECRET
         generateValue: true

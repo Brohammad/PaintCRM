@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Paint Preview App</title>
+    <!-- Auth gate: the app opens on the login page unless there is a session or
+         the visitor chose "continue without an account". Runs before anything
+         else so unauthenticated visitors are redirected immediately. -->
+    <script>
+      (function () {
+        try {
+          var hasToken = localStorage.getItem("paintcrm_api_token_v1");
+          var isGuest = localStorage.getItem("paintcrm_guest_v1") === "1";
+          if (!hasToken && !isGuest) {
+            var dest = location.pathname + location.search + location.hash;
+            location.replace("/login?redirect=" + encodeURIComponent(dest));
+          }
+        } catch (e) {
+          /* localStorage blocked — fall through to the app */
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet" />

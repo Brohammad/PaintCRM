@@ -267,6 +267,15 @@ const ANALYTICS_STORAGE_KEY = "paintcrm_analytics_v1";
 const DEALER_STORAGE_KEY = "paintcrm_dealer_v1";
 
 // Phase 4: backend API — token storage + apiRequest live in ./src/api.js.
+// Guests who chose "continue without an account" get this flag so the auth
+// gate lets them use the offline features without a session.
+const GUEST_MODE_KEY = "paintcrm_guest_v1";
+function isGuestMode() {
+  try { return localStorage.getItem(GUEST_MODE_KEY) === "1"; } catch { return false; }
+}
+function exitGuestMode() {
+  try { localStorage.removeItem(GUEST_MODE_KEY); } catch { /* nothing */ }
+}
 
 // Phase 5: CRM offline cache
 const CUSTOMERS_CACHE_KEY = "paintcrm_customers_cache_v1";
@@ -2278,20 +2287,40 @@ function clearApiToken() {
   crmCustomers = [];
 }
 
-// When a session can no longer be refreshed, reset the UI to signed-out state.
+// The app is gated behind sign-in, so send unauthenticated users to the login
+// page (preserving where they were headed) instead of leaving them on a
+// signed-out home screen.
+function redirectToLogin() {
+  const dest = location.pathname + location.search + location.hash;
+  location.replace("/login?redirect=" + encodeURIComponent(dest));
+}
+
+// When a session can no longer be refreshed, reset state and return to login.
 setUnauthorizedHandler(() => {
   apiTenant = null;
   crmCustomers = [];
   try { localStorage.removeItem(CUSTOMERS_CACHE_KEY); } catch { /* nothing */ }
   if (typeof updateServerSyncUI === "function") updateServerSyncUI();
+  redirectToLogin();
 });
 
 // Called at startup — tries to validate stored token + load tenant info
 async function loadApiSession() {
   const token = getApiToken();
-  if (!token) return;
+  if (!token) {
+    // Guests explicitly opted into offline use; everyone else gets sent to login.
+    if (!isGuestMode()) redirectToLogin();
+    return;
+  }
   const { data, error } = await apiRequest("GET", "/api/auth/me");
-  if (error || !data?.tenant) { clearApiToken(); updateServerSyncUI(); return; }
+  if (error || !data?.tenant) {
+    // A genuine 401 is already handled by the unauthorized handler in
+    // ./src/api.js (tokens cleared + redirect to /login). Other failures
+    // (offline / server error) are transient — keep the session so a brief
+    // hiccup doesn't sign the user out.
+    updateServerSyncUI();
+    return;
+  }
   apiTenant = data.tenant;
   updateServerSyncUI();
   await completeServerSessionRestore();
@@ -2301,6 +2330,7 @@ async function loginToServer(email, password) {
   const { data, error } = await apiRequest("POST", "/api/auth/login", { email, password });
   if (error) return { ok: false, error };
   setSession(data);
+  exitGuestMode();
   apiTenant = data.tenant;
   updateServerSyncUI();
   await completeServerSessionRestore();
@@ -2311,6 +2341,7 @@ async function registerOnServer(shopName, dealerName, phone, email, password) {
   const { data, error } = await apiRequest("POST", "/api/auth/register", { shopName, dealerName, phone, email, password });
   if (error) return { ok: false, error };
   setSession(data);
+  exitGuestMode();
   apiTenant = data.tenant;
   updateServerSyncUI();
   await completeServerSessionRestore();
@@ -2344,6 +2375,7 @@ async function logoutFromServer() {
   clearApiToken();
   updateServerSyncUI();
   showTransientToast("Signed out from server.");
+  redirectToLogin();
 }
 
 // Sync a single lead to the server (fire-and-forget; local state is source of truth)
