@@ -15,8 +15,7 @@ services:
     runtime: docker
     plan: free
     region: singapore
-    # Once this branch is merged to main, change this to `main`.
-    branch: cursor/fix-production-hardening-issues
+    branch: main
     dockerfilePath: ./server/Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
