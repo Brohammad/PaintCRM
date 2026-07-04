@@ -15,7 +15,7 @@ services:
     runtime: docker
     plan: free
     region: singapore
-    branch: main
+    branch: cursor/fix-production-hardening-issues
     dockerfilePath: ./server/Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
