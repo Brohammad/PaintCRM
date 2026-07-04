@@ -32,6 +32,9 @@ COPY --chown=nodejs:nodejs server/ ./
 # Copy the built frontend bundle (served at runtime from ../paint-preview-app/dist)
 COPY --chown=nodejs:nodejs --from=frontend /app/paint-preview-app/dist /app/paint-preview-app/dist
 
+# Seed migration 005 reads the raw shades.json from ../../paint-preview-app/shades.json
+COPY --chown=nodejs:nodejs paint-preview-app/shades.json /app/paint-preview-app/shades.json
+
 # Create logs directory
 RUN mkdir -p /app/server/logs && chown -R nodejs:nodejs /app/server/logs
 
