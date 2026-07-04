@@ -1307,3 +1307,13 @@ body {
   border-radius: 8px;
 }
 .ledger-reminders li .status-badge { margin-right: 6px; }
+
+/* "Load more" pager row shared by paginated lists */
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 4px;
+}
+.load-more-row .button {
+  min-width: 180px;
+}

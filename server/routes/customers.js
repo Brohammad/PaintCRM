@@ -1,43 +1,43 @@
 const express = require('express');
 const { query } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
+const { parsePagination, paginationMeta } = require('../lib/pagination');
 
 const router = express.Router();
 router.use(requireAuth);
 
 const VALID_TYPES = new Set(['end_customer', 'contractor']);
 
-// GET /api/customers — list customers (?q= search)
+// GET /api/customers — list customers (?q= search, ?limit= &offset=)
 router.get('/', async (req, res, next) => {
   try {
     const q = (req.query.q || '').trim();
-    let result;
+    const { limit, offset } = parsePagination(req.query);
+    const params = [req.tenant.id];
+    let where = 'c.tenant_id = $1';
 
     if (q) {
-      const pattern = `%${q}%`;
-      result = await query(
-        `SELECT c.*,
-                (SELECT COUNT(*)::int FROM leads l WHERE l.customer_id = c.id) AS lead_count,
-                (SELECT COUNT(*)::int FROM sites s WHERE s.customer_id = c.id) AS site_count
-         FROM customers c
-         WHERE c.tenant_id = $1
-           AND (c.name ILIKE $2 OR c.phone ILIKE $2 OR c.email ILIKE $2)
-         ORDER BY c.updated_at DESC`,
-        [req.tenant.id, pattern]
-      );
-    } else {
-      result = await query(
-        `SELECT c.*,
-                (SELECT COUNT(*)::int FROM leads l WHERE l.customer_id = c.id) AS lead_count,
-                (SELECT COUNT(*)::int FROM sites s WHERE s.customer_id = c.id) AS site_count
-         FROM customers c
-         WHERE c.tenant_id = $1
-         ORDER BY c.updated_at DESC`,
-        [req.tenant.id]
-      );
+      params.push(`%${q}%`);
+      where += ` AND (c.name ILIKE $${params.length} OR c.phone ILIKE $${params.length} OR c.email ILIKE $${params.length})`;
     }
+    params.push(limit, offset);
 
-    res.json({ customers: result.rows.map(formatCustomer) });
+    const result = await query(
+      `SELECT c.*,
+              (SELECT COUNT(*)::int FROM leads l WHERE l.customer_id = c.id) AS lead_count,
+              (SELECT COUNT(*)::int FROM sites s WHERE s.customer_id = c.id) AS site_count,
+              COUNT(*) OVER()::int AS total_count
+       FROM customers c
+       WHERE ${where}
+       ORDER BY c.updated_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({
+      customers: result.rows.map(formatCustomer),
+      pagination: paginationMeta(result.rows, limit, offset),
+    });
   } catch (err) {
     next(err);
   }

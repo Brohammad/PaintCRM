@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { parsePagination } = require('../lib/pagination');
 const {
   ENTRY_TYPES,
   MANUAL_SOURCES,
@@ -25,13 +26,14 @@ router.get('/summary', async (req, res, next) => {
 });
 
 // GET /api/ledger/customers — customers with an outstanding balance
-// (?overdue=true, ?q= search by name/phone)
+// (?overdue=true, ?q= search by name/phone, ?limit= &offset=)
 router.get('/customers', async (req, res, next) => {
   try {
     const overdueOnly = req.query.overdue === 'true' || req.query.overdue === '1';
     const q = (req.query.q || '').trim();
-    const customers = await listBalances(req.tenant.id, { overdueOnly, q });
-    res.json({ customers });
+    const { limit, offset } = parsePagination(req.query);
+    const { rows, total } = await listBalances(req.tenant.id, { overdueOnly, q, limit, offset });
+    res.json({ customers: rows, pagination: { total, limit, offset, hasMore: offset + rows.length < total } });
   } catch (err) {
     next(err);
   }

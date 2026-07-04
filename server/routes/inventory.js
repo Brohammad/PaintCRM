@@ -1,6 +1,7 @@
 const express = require('express');
 const { query } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
+const { parsePagination, paginationMeta } = require('../lib/pagination');
 const {
   STOCK_STATUSES,
   createItem,
@@ -25,11 +26,12 @@ function isDuplicateSku(err) {
   return err && err.code === '23505';
 }
 
-// GET /api/inventory — list (?q= search, ?status= filter)
+// GET /api/inventory — list (?q= search, ?status= filter, ?limit= &offset=)
 router.get('/', async (req, res, next) => {
   try {
     const q = (req.query.q || '').trim();
     const status = req.query.status;
+    const { limit, offset } = parsePagination(req.query);
     const params = [req.tenant.id];
     let where = 'tenant_id = $1';
 
@@ -40,15 +42,19 @@ router.get('/', async (req, res, next) => {
     if (status && STOCK_STATUSES.includes(status)) {
       where += ` AND (${statusClause(status)})`;
     }
+    params.push(limit, offset);
 
     const result = await query(
-      `SELECT * FROM inventory_items
+      `SELECT *, COUNT(*) OVER()::int AS total_count FROM inventory_items
        WHERE ${where}
        ORDER BY name ASC
-       LIMIT 500`,
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
-    res.json({ items: result.rows.map(formatItem) });
+    res.json({
+      items: result.rows.map(formatItem),
+      pagination: paginationMeta(result.rows, limit, offset),
+    });
   } catch (err) {
     next(err);
   }

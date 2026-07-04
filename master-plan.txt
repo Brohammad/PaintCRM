@@ -154,6 +154,24 @@ Phase 6 - Commercial Modules (In progress)
     account detail with record-payment / add-charge / log-reminder controls and statement
   - Jest: ledger.test.js (backend suite now 104 tests, coverage >70%)
 
+Scale hardening (Done — Jul 2026)
+- Pagination: shared lib/pagination.js; every list endpoint (customers, leads, quotes,
+  orders, inventory, ledger/customers) takes ?limit=&offset= (default 50, max 200) and
+  returns pagination:{total,limit,offset,hasMore} via a COUNT(*) OVER() window column.
+  Frontend debtor worklist has a "Load more" pager (createPaginator + withPageParams).
+- Auth lifecycle: short-lived access JWT (~15m) + rotating refresh tokens persisted as
+  SHA-256 hashes (migration 010 refresh_tokens). /auth/refresh rotates + does reuse
+  detection (replaying a rotated token revokes the whole chain); /auth/logout and
+  /auth/logout-all revoke sessions. Frontend refreshes transparently on 401. Password
+  policy raised to >=8 chars with a letter and a number. TTLs via ACCESS_TOKEN_TTL /
+  REFRESH_TOKEN_TTL_DAYS.
+- Frontend modularization: Vite build (minified + hashed assets, sourcemaps); logic split
+  into ES modules src/api.js, src/utils.js, src/pagination.js with Vitest+jsdom unit tests
+  (21 frontend tests). Server serves built dist/ when present, else raw source.
+- Deployment: multi-stage Dockerfile now builds the frontend; fly.toml + CI Fly.io deploy
+  (staging -> production, gated on FLY_API_TOKEN); DB_SSL flag for Fly-internal vs managed
+  Postgres. Backend suite now 123 Jest tests.
+
 Phase 7 - AI and Differentiation
 - Better palette recommendations (style/mood)
 - Cost estimator in decision flow

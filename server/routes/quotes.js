@@ -1,6 +1,7 @@
 const express = require('express');
 const { query } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
+const { parsePagination, paginationMeta } = require('../lib/pagination');
 const {
   QUOTE_STATUSES,
   createQuote,
@@ -34,10 +35,11 @@ async function resolveSite(tenantId, siteId, customerId) {
   return res.rows.length > 0 ? siteId : null;
 }
 
-// GET /api/quotes — list (?customerId= &status=)
+// GET /api/quotes — list (?customerId= &status= &limit= &offset=)
 router.get('/', async (req, res, next) => {
   try {
     const { customerId, status } = req.query;
+    const { limit, offset } = parsePagination(req.query);
     const params = [req.tenant.id];
     let where = 'q.tenant_id = $1';
     if (customerId) {
@@ -48,20 +50,25 @@ router.get('/', async (req, res, next) => {
       params.push(status);
       where += ` AND q.status = $${params.length}`;
     }
+    params.push(limit, offset);
 
     const result = await query(
       `SELECT q.*, c.name AS customer_name, s.name AS site_name,
-              (SELECT COUNT(*)::int FROM quote_items qi WHERE qi.quote_id = q.id) AS item_count
+              (SELECT COUNT(*)::int FROM quote_items qi WHERE qi.quote_id = q.id) AS item_count,
+              COUNT(*) OVER()::int AS total_count
        FROM quotes q
        JOIN customers c ON c.id = q.customer_id
        LEFT JOIN sites s ON s.id = q.site_id
        WHERE ${where}
        ORDER BY q.created_at DESC
-       LIMIT 200`,
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
 
-    res.json({ quotes: result.rows.map((row) => formatQuote(row)) });
+    res.json({
+      quotes: result.rows.map((row) => formatQuote(row)),
+      pagination: paginationMeta(result.rows, limit, offset),
+    });
   } catch (err) {
     next(err);
   }

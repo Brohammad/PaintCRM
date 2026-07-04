@@ -28,6 +28,6 @@ afterAll(async () => {
 // Clean tables between tests
 global.cleanDatabase = async () => {
   await pool.query(
-    'TRUNCATE TABLE payment_reminders, ledger_entries, inventory_movements, inventory_items, order_items, orders, quote_items, quotes, preview_sessions, leads, sites, customers, events, tenants, shades RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE refresh_tokens, payment_reminders, ledger_entries, inventory_movements, inventory_items, order_items, orders, quote_items, quotes, preview_sessions, leads, sites, customers, events, tenants, shades RESTART IDENTITY CASCADE'
   );
 };

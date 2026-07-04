@@ -1,12 +1,20 @@
 # Build context must be the repo root: docker build -f server/Dockerfile .
+
+# --- Frontend build stage (Vite bundle) ---
+FROM node:20-alpine AS frontend
+WORKDIR /app/paint-preview-app
+COPY paint-preview-app/package*.json ./
+RUN npm ci
+COPY paint-preview-app/ ./
+RUN npm run build
+
+# --- Server dependency stage ---
 FROM node:20-alpine AS builder
-
 WORKDIR /app/server
-
 COPY server/package*.json ./
 RUN npm ci --only=production
 
-# Production stage
+# --- Production stage ---
 FROM node:20-alpine AS production
 
 RUN apk add --no-cache dumb-init curl ca-certificates \
@@ -21,8 +29,8 @@ COPY --from=builder /app/server/node_modules ./node_modules
 # Copy server application code
 COPY --chown=nodejs:nodejs server/ ./
 
-# Copy frontend static files (served at runtime via ../paint-preview-app relative path)
-COPY --chown=nodejs:nodejs paint-preview-app/ /app/paint-preview-app/
+# Copy the built frontend bundle (served at runtime from ../paint-preview-app/dist)
+COPY --chown=nodejs:nodejs --from=frontend /app/paint-preview-app/dist /app/paint-preview-app/dist
 
 # Create logs directory
 RUN mkdir -p /app/server/logs && chown -R nodejs:nodejs /app/server/logs

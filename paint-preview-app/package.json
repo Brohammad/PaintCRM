@@ -1,0 +1,19 @@
+{
+  "name": "paintcrm-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PaintCRM frontend — paint decision engine + dealer CRM UI",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  }
+}

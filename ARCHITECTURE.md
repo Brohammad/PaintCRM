@@ -96,11 +96,19 @@ The system is intentionally **offline-first**. A dealer should be able to run a 
 
 ```
 PaintCRM/
-├── paint-preview-app/          # Frontend (zero build step)
-│   ├── index.html              # Single-page app shell, all modals inline
-│   ├── script.js               # ~2750 lines, all logic — no framework
-│   ├── styles.css              # ~940 lines, custom design system
-│   ├── shades.json             # 63-shade catalog (Asian Paints, Dulux, Berger, Nerolac)
+├── paint-preview-app/          # Frontend (Vite build; ES modules)
+│   ├── index.html              # SPA shell + all modals; module entry = ./script.js
+│   ├── script.js               # UI/DOM logic (module entry), imports src/*
+│   ├── src/                    # Extracted, unit-tested ES modules
+│   │   ├── api.js              # token storage + apiRequest w/ refresh-on-401
+│   │   ├── utils.js            # escHtml / money / rounding helpers
+│   │   ├── pagination.js       # withPageParams + createPaginator
+│   │   └── *.test.js           # Vitest + jsdom unit tests
+│   ├── styles.css              # custom design system
+│   ├── shades.json             # 63-shade catalog (also copied to public/ for the build)
+│   ├── public/                 # Static assets copied verbatim into dist/
+│   ├── vite.config.js          # Vite + Vitest config (base './', outDir dist)
+│   ├── package.json            # dev/build/test scripts (vite, vitest, jsdom)
 │   └── react-canvas-component/ # Portable React/Next.js extraction of canvas logic
 │       ├── WallRecolorCanvas.tsx
 │       └── pixelUtils.ts
@@ -490,24 +498,33 @@ express()
 
 The server listens on `PORT` (default 3001). Serving the frontend from the same origin eliminates CORS entirely.
 
-### 4.2 Authentication — JWT + bcrypt
+### 4.2 Authentication — access + refresh token lifecycle
 
-**Registration:**
-1. Validate `shopName`, `email`, `password` (≥6 chars)
-2. Check `tenants` table for email uniqueness
-3. `bcrypt.hashSync(password, 12)` — 12 salt rounds (~200ms on modern hardware)
-4. Insert tenant row with `uuid()` primary key
-5. Sign JWT: `{ id, email, shopName }`, 30-day TTL
-6. Return `{ token, tenant }`
+Auth uses a **short-lived access token + long-lived rotating refresh token** model (`server/lib/tokens.js`). The access token is a JWT; the refresh token is an opaque random secret persisted server-side (only its SHA-256 hash) in `refresh_tokens`, so sessions can be revoked.
 
-**Login:**
-1. Fetch tenant by email (lowercase normalized)
-2. `bcrypt.compareSync(password, hash)` — constant-time comparison
-3. On success: sign new JWT, return `{ token, tenant }`
+**Password policy:** min 8 chars containing at least one letter and one number (`passwordPolicyError` in `routes/auth.js`).
+
+**Registration / Login:**
+1. Validate input; check email uniqueness (register)
+2. `bcrypt.hashSync(password, 12)` / `bcrypt.compareSync` — 12 salt rounds
+3. `issueSession(tenant)` → signs a `~15m` access JWT **and** inserts a refresh-token row
+4. Return `{ token, refreshToken, expiresIn, tenant }`
+
+**Refresh (`POST /api/auth/refresh`) — rotation + reuse detection:**
+```
+{ refreshToken }
+  → look up SHA-256(refreshToken) in refresh_tokens
+  → if revoked  → REUSE DETECTED: revoke all tenant tokens, 401
+  → if expired  → 401
+  → else: issue a NEW access + refresh pair, mark the old row
+          revoked_at + replaced_by (one-time use), return the pair
+```
+
+**Revocation:** `POST /api/auth/logout` revokes the presented refresh token; `POST /api/auth/logout-all` (auth required) revokes every active session for the tenant.
 
 **Request auth middleware (`requireAuth`):**
 ```
-Authorization: Bearer <jwt>
+Authorization: Bearer <access-jwt>
   → jwt.verify(token, JWT_SECRET)
   → attach req.tenant = { id, email, shopName }
   → next()
@@ -515,7 +532,9 @@ Authorization: Bearer <jwt>
 
 `optionalAuth` follows the same path but calls `next()` on failure (used for `/api/events` so anonymous events can be ingested).
 
-**JWT claims are minimal** (id + email + shopName). All tenant data is fetched fresh from DB when needed via `GET /api/auth/me`.
+**Access token claims are minimal** (id + email + shopName + `type: 'access'`). All tenant data is fetched fresh from DB when needed via `GET /api/auth/me`. TTLs are configurable via `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL_DAYS`.
+
+**Pagination:** all list endpoints accept `?limit=` & `?offset=` (default 50, max 200) via `lib/pagination.js` and return a sibling `pagination: { total, limit, offset, hasMore }` block computed with a `COUNT(*) OVER()` window column.
 
 ### 4.3 Database Schema (PostgreSQL)
 
@@ -1282,15 +1301,20 @@ All PostgreSQL queries use parameterized statements via `pg` pool. Typical respo
 
 **Dockerfile Strategy (Multi-stage build):**
 ```
-Stage 1 (builder): npm ci --only=production
-Stage 2 (production): Alpine Linux, non-root user, health checks
+Stage 1 (frontend): node:20-alpine — npm ci && vite build → paint-preview-app/dist
+Stage 2 (builder):  npm ci --only=production (server deps)
+Stage 3 (production): Alpine Linux, non-root user, health checks;
+                      copies server code + the built frontend dist
 ```
+The server serves the built bundle: `resolveFrontendDir()` prefers `FRONTEND_DIR`, then `paint-preview-app/dist`, then the raw source (zero-build local dev).
 
 **Security hardening:**
 - Runs as `nodejs` user (UID 1001), not root
 - `dumb-init` for proper signal handling (PID 1 problem)
 - Health check: `curl -f http://localhost:3001/api/health`
 - Read-only root filesystem where possible
+
+**Managed deploy (Fly.io):** `fly.toml` at the repo root builds from `server/Dockerfile`, runs migrations on container start, and exposes the health check. `DB_SSL` toggles Postgres TLS (`false` for Fly's private-network Postgres; on by default for managed providers). CI deploys to staging → production via the `superfly/flyctl-actions` action, gated on the `FLY_API_TOKEN` secret.
 
 **docker-compose.yml orchestration:**
 ```yaml
@@ -1507,4 +1531,4 @@ export default function () {
 
 ---
 
-*Last updated: Jul 4, 2026 — Phase 6 quote → order flow, inventory/stock status, and credit ledger + payment reminders complete*
+*Last updated: Jul 4, 2026 — Phase 6 (quote → order, inventory, credit ledger + reminders) plus scale hardening: paginated APIs, refresh-token auth lifecycle, Vite-bundled modular frontend with Vitest tests, and Fly.io deploy*

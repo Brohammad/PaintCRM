@@ -5,8 +5,18 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const pinoHttp = require('pino-http');
 const path = require('path');
+const fs = require('fs');
 
 const { register, httpRequestDuration, httpRequestErrors } = require('./lib/metrics');
+
+// Picks the directory to serve the frontend from: an explicit FRONTEND_DIR
+// override, else the Vite build output if present, else the raw source.
+function resolveFrontendDir() {
+  if (process.env.FRONTEND_DIR) return path.resolve(process.env.FRONTEND_DIR);
+  const distDir = path.join(__dirname, '../paint-preview-app/dist');
+  if (fs.existsSync(path.join(distDir, 'index.html'))) return distDir;
+  return path.join(__dirname, '../paint-preview-app');
+}
 
 const app = express();
 
@@ -183,10 +193,10 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// Static frontend files
-const FRONTEND_DIR = process.env.FRONTEND_DIR
-  ? path.resolve(process.env.FRONTEND_DIR)
-  : path.join(__dirname, '../paint-preview-app');
+// Static frontend files. Prefer an explicit FRONTEND_DIR, then a Vite build
+// output (paint-preview-app/dist), falling back to the raw source directory
+// so local dev works without a build step.
+const FRONTEND_DIR = resolveFrontendDir();
 app.use(express.static(FRONTEND_DIR));
 
 // SPA fallback

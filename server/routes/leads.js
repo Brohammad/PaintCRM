@@ -2,6 +2,7 @@ const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const { query } = require("../lib/db");
 const { requireAuth } = require("../middleware/auth");
+const { parsePagination, paginationMeta } = require("../lib/pagination");
 const {
   resolveCustomerId,
   assertSiteForCustomer,
@@ -13,17 +14,24 @@ const router = express.Router();
 // Apply auth middleware to all routes
 router.use(requireAuth);
 
-// GET /api/leads — list all leads for tenant (newest first)
+// GET /api/leads — list leads for tenant (newest first, ?limit= &offset=)
 router.get("/", async (req, res, next) => {
   try {
+    const { limit, offset } = parsePagination(req.query);
     const result = await query(
       `SELECT id, name, phone, email, notes, shades_json, cost_estimate_json,
-              customer_id, site_id, created_at, synced_at
-       FROM leads WHERE tenant_id = $1 ORDER BY created_at DESC`,
-      [req.tenant.id]
+              customer_id, site_id, created_at, synced_at,
+              COUNT(*) OVER()::int AS total_count
+       FROM leads WHERE tenant_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [req.tenant.id, limit, offset]
     );
 
-    res.json({ leads: result.rows.map(formatLead) });
+    res.json({
+      leads: result.rows.map(formatLead),
+      pagination: paginationMeta(result.rows, limit, offset),
+    });
   } catch (err) {
     next(err);
   }

@@ -194,7 +194,8 @@ async function getCustomerLedger(tenantId, customerId) {
 }
 
 // Worklist of customers with an outstanding balance (optionally overdue-only).
-async function listBalances(tenantId, { overdueOnly = false, q = '' } = {}) {
+// Returns { rows, total } for the route to page over.
+async function listBalances(tenantId, { overdueOnly = false, q = '', limit = 50, offset = 0 } = {}) {
   const params = [tenantId];
   let filter = '';
   if (q) {
@@ -204,6 +205,8 @@ async function listBalances(tenantId, { overdueOnly = false, q = '' } = {}) {
 
   let outer = 'WHERE a.balance > 0.005';
   if (overdueOnly) outer += ' AND a.oldest_overdue_due IS NOT NULL';
+
+  params.push(limit, offset);
 
   const res = await query(
     `WITH a AS (
@@ -216,7 +219,7 @@ async function listBalances(tenantId, { overdueOnly = false, q = '' } = {}) {
        WHERE c.tenant_id = $1${filter}
        GROUP BY c.id, c.name, c.phone
      )
-     SELECT a.*, r.last_reminder_at
+     SELECT a.*, r.last_reminder_at, COUNT(*) OVER()::int AS total_count
      FROM a
      LEFT JOIN LATERAL (
        SELECT MAX(created_at) AS last_reminder_at
@@ -225,10 +228,11 @@ async function listBalances(tenantId, { overdueOnly = false, q = '' } = {}) {
      ) r ON TRUE
      ${outer}
      ORDER BY (a.oldest_overdue_due IS NOT NULL) DESC, a.balance DESC
-     LIMIT 200`,
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params
   );
-  return res.rows.map(formatBalanceRow);
+  const total = res.rows.length > 0 ? Number(res.rows[0].total_count) : 0;
+  return { rows: res.rows.map(formatBalanceRow), total };
 }
 
 // Tenant-wide receivables snapshot for the ledger dashboard.

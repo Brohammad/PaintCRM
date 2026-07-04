@@ -94,8 +94,11 @@ A full Node.js + Express + PostgreSQL backend in `server/` with:
 
 | Endpoint | What it does |
 |----------|-------------|
-| `POST /api/auth/register` | Create a dealer account (shop name, email, password) — returns JWT |
-| `POST /api/auth/login` | Authenticate — returns JWT (30-day expiry) |
+| `POST /api/auth/register` | Create a dealer account — returns a short-lived access token + a refresh token |
+| `POST /api/auth/login` | Authenticate — returns an access token (`~15m`) + a rotating refresh token |
+| `POST /api/auth/refresh` | Exchange a refresh token for a fresh access token (rotates the refresh token) |
+| `POST /api/auth/logout` | Revoke the current session's refresh token |
+| `POST /api/auth/logout-all` | Revoke every active session for the tenant |
 | `GET /api/auth/me` | Validate token, return tenant profile |
 | `GET /api/leads` | List all leads for the signed-in dealer |
 | `POST /api/leads` | Create / upsert a lead (id, name, phone, shades, snapshot) |
@@ -196,6 +199,14 @@ Credit ledger + payment reminders:
 - **Reminder actions** — log a WhatsApp / call / SMS / email follow-up; each is timestamped with the balance at the time
 - Requires sign-in (commercial data is server-only)
 
+### Platform & scale hardening (done)
+
+Cross-cutting improvements that make the platform production-ready at scale:
+
+- **Paginated list APIs** — every list endpoint (`customers`, `leads`, `quotes`, `orders`, `inventory`, `ledger/customers`) accepts `?limit=` & `?offset=` and returns a `pagination` block `{ total, limit, offset, hasMore }`. Defaults to 50/page, capped at 200. The debtor worklist has a **"Load more"** pager wired to it.
+- **Hardened auth lifecycle** — short-lived access tokens (`~15m`) backed by long-lived, **rotating** refresh tokens persisted server-side (only the SHA-256 hash is stored). Refresh rotation includes **reuse detection** (replaying a rotated token revokes the whole session chain), plus `logout` (single session) and `logout-all` (every session). The frontend refreshes access tokens **transparently on `401`**. Password policy: min 8 chars with at least one letter and one number.
+- **Modular, bundled frontend** — the app is built with **Vite** (minified + hashed assets, source maps). Reusable logic is split into ES modules (`src/api.js`, `src/utils.js`, `src/pagination.js`) with **Vitest + jsdom** unit tests. The server serves the built `dist/` when present (falls back to raw source for zero-build local dev).
+
 ---
 
 ## User flow (demo script)
@@ -239,6 +250,33 @@ curl -s -X POST http://localhost:3001/api/auth/register \
   -d '{"shopName":"My Shop","email":"me@shop.com","password":"demo1234"}'
 ```
 
+### Frontend unit tests (Vitest)
+
+```bash
+cd paint-preview-app
+npm install
+npm test          # run the jsdom unit tests
+npm run build     # produce the minified bundle in dist/
+```
+
+---
+
+## Deployment (Fly.io)
+
+The app ships a multi-stage `server/Dockerfile` that builds the Vite frontend and bundles it with the API, plus a repo-root `fly.toml`.
+
+```bash
+# One-time
+fly apps create paintcrm
+fly postgres create --name paintcrm-db && fly postgres attach paintcrm-db
+fly secrets set JWT_SECRET="$(openssl rand -hex 32)" DB_SSL=false
+
+# Deploy
+fly deploy            # or push to main — CI deploys via the Fly GitHub Action
+```
+
+CI/CD (`.github/workflows/ci.yml`) runs backend lint/tests, frontend tests + build, a Docker build, and a Trivy scan, then deploys to Fly.io staging → production on `main` (gated on the `FLY_API_TOKEN` secret; the deploy steps no-op cleanly when it isn't set).
+
 ---
 
 ## React component
@@ -258,6 +296,7 @@ curl -s -X POST http://localhost:3001/api/auth/register \
 | 4 | Done | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking, Docker, CI |
 | 5 | Done | CRM Lite — customer CRUD, sites/projects, session timeline (server sync) |
 | 6 | In progress | Commercial modules — quote → order flow, inventory/stock status, credit ledger + payment reminders |
+| — | Done | Scale hardening — paginated APIs, refresh-token auth lifecycle, Vite-bundled modular frontend + tests, Fly.io deploy |
 | 7+ | Future | AI palette recommendations, dealer assistant |
 
 See [`master-plan.txt`](master-plan.txt) for the full execution plan with sprint breakdowns and success metrics.

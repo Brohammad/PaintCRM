@@ -1,11 +1,16 @@
 const { Pool } = require('pg');
 const { dbQueryDuration } = require('./metrics');
 
+// SSL is enabled in production by default, but can be forced on/off with DB_SSL
+// (true/false | require/disable). Fly.io's internal Postgres runs over a private
+// network without TLS (DB_SSL=false); managed providers (Neon, Supabase, RDS)
+// need SSL, often with DB_SSL_REJECT_UNAUTHORIZED=false for their chain.
 const sslConfig = (() => {
-  if (process.env.NODE_ENV === 'production') {
-    return { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' };
-  }
-  return false;
+  const flag = (process.env.DB_SSL || '').toLowerCase();
+  if (flag === 'false' || flag === 'disable') return false;
+  const enabled = flag === 'true' || flag === 'require' || process.env.NODE_ENV === 'production';
+  if (!enabled) return false;
+  return { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' };
 })();
 
 const config = {

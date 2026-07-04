@@ -1,3 +1,14 @@
+import { escHtml, fmtMoney, round2 } from "./src/utils.js";
+import {
+  apiRequest,
+  getApiToken,
+  getRefreshToken,
+  setSession,
+  clearTokens,
+  setUnauthorizedHandler,
+} from "./src/api.js";
+import { createPaginator, withPageParams } from "./src/pagination.js";
+
 const imageInput = document.getElementById("imageInput");
 const exportBtn = document.getElementById("exportBtn");
 const beforeAfterToggle = document.getElementById("beforeAfterToggle");
@@ -255,9 +266,7 @@ let currentDetailLeadId = null;
 const ANALYTICS_STORAGE_KEY = "paintcrm_analytics_v1";
 const DEALER_STORAGE_KEY = "paintcrm_dealer_v1";
 
-// Phase 4: backend API
-const API_TOKEN_KEY = "paintcrm_api_token_v1";
-const API_TENANT_KEY = "paintcrm_api_tenant_v1";
+// Phase 4: backend API — token storage + apiRequest live in ./src/api.js.
 
 // Phase 5: CRM offline cache
 const CUSTOMERS_CACHE_KEY = "paintcrm_customers_cache_v1";
@@ -2258,43 +2267,24 @@ function clearSession() {
 
 /* ===================== Phase 4: Backend API Sync ===================== */
 
-// API_BASE is empty so all paths are relative — works whether the app is
-// opened directly as a file (offline, no sync) or served by the Express server.
-const API_BASE = "";
-
-function getApiToken() {
-  try { return localStorage.getItem(API_TOKEN_KEY) || null; } catch { return null; }
-}
-function setApiToken(t) {
-  try { localStorage.setItem(API_TOKEN_KEY, t); } catch { /* storage full */ }
-}
+// Clears the server session locally (tokens live in ./src/api.js) and wipes
+// any cached CRM data so nothing leaks across sign-ins.
 function clearApiToken() {
+  clearTokens();
   try {
-    localStorage.removeItem(API_TOKEN_KEY);
-    localStorage.removeItem(API_TENANT_KEY);
-    localStorage.removeItem(CUSTOMERS_CACHE_KEY); // don't leave CRM data after logout
+    localStorage.removeItem(CUSTOMERS_CACHE_KEY);
   } catch { /* nothing */ }
   apiTenant = null;
   crmCustomers = [];
 }
 
-async function apiRequest(method, path, body) {
-  try {
-    const token = getApiToken();
-    const headers = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(API_BASE + path, {
-      method,
-      headers,
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { data: null, error: data.error || `HTTP ${res.status}` };
-    return { data, error: null };
-  } catch (err) {
-    return { data: null, error: err.message || "Network error" };
-  }
-}
+// When a session can no longer be refreshed, reset the UI to signed-out state.
+setUnauthorizedHandler(() => {
+  apiTenant = null;
+  crmCustomers = [];
+  try { localStorage.removeItem(CUSTOMERS_CACHE_KEY); } catch { /* nothing */ }
+  if (typeof updateServerSyncUI === "function") updateServerSyncUI();
+});
 
 // Called at startup — tries to validate stored token + load tenant info
 async function loadApiSession() {
@@ -2310,7 +2300,7 @@ async function loadApiSession() {
 async function loginToServer(email, password) {
   const { data, error } = await apiRequest("POST", "/api/auth/login", { email, password });
   if (error) return { ok: false, error };
-  setApiToken(data.token);
+  setSession(data);
   apiTenant = data.tenant;
   updateServerSyncUI();
   await completeServerSessionRestore();
@@ -2320,7 +2310,7 @@ async function loginToServer(email, password) {
 async function registerOnServer(shopName, dealerName, phone, email, password) {
   const { data, error } = await apiRequest("POST", "/api/auth/register", { shopName, dealerName, phone, email, password });
   if (error) return { ok: false, error };
-  setApiToken(data.token);
+  setSession(data);
   apiTenant = data.tenant;
   updateServerSyncUI();
   await completeServerSessionRestore();
@@ -2345,7 +2335,12 @@ async function syncDealerFromServer() {
   });
 }
 
-function logoutFromServer() {
+async function logoutFromServer() {
+  // Best-effort server-side revocation of this session's refresh token.
+  const refreshToken = getRefreshToken();
+  if (refreshToken) {
+    await apiRequest("POST", "/api/auth/logout", { refreshToken });
+  }
   clearApiToken();
   updateServerSyncUI();
   showTransientToast("Signed out from server.");
@@ -2859,21 +2854,6 @@ const ORDER_STATUS_LABELS = { pending: "Pending", confirmed: "Confirmed", fulfil
 const QUOTE_ALL_STATUSES = ["draft", "sent", "accepted", "rejected", "converted"];
 const CLIENT_QUOTE_STATUSES = ["draft", "sent", "accepted", "rejected"];
 const ORDER_STATUSES = ["pending", "confirmed", "fulfilled", "cancelled"];
-
-function round2(n) {
-  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-}
-
-function escHtml(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
-  );
-}
-
-function fmtMoney(n) {
-  const v = Number(n) || 0;
-  return "₹" + v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 function statusBadge(status, labels) {
   return `<span class="status-badge ${status}">${labels[status] || status}</span>`;
@@ -3591,27 +3571,71 @@ async function renderLedgerSummary() {
     <div class="inv-chip low"><div class="n">${s.overdueCustomers}</div><div class="l">Overdue</div></div>`;
 }
 
-async function renderLedgerList() {
-  if (!ledgerList) return;
-  ledgerList.innerHTML = `<p class="muted tiny">Loading…</p>`;
+const ledgerPaginator = createPaginator();
+
+function ledgerListQuery() {
   const q = (ledgerSearchInput?.value || "").trim();
   const overdue = ledgerFilter?.value === "overdue";
   const params = [];
   if (q) params.push(`q=${encodeURIComponent(q)}`);
   if (overdue) params.push("overdue=true");
-  const qs = params.length ? `?${params.join("&")}` : "";
+  let path = "/api/ledger/customers";
+  if (params.length) path += `?${params.join("&")}`;
+  return path;
+}
 
-  const { data, error } = await apiRequest("GET", `/api/ledger/customers${qs}`);
-  if (error) { ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
+// Renders the first page (resets paging). Safe to pass as an event listener.
+async function renderLedgerList() {
+  if (!ledgerList) return;
+  ledgerPaginator.reset();
+  ledgerList.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  await fetchLedgerPage(false);
+}
+
+async function loadMoreLedger() {
+  await fetchLedgerPage(true);
+}
+
+async function fetchLedgerPage(append) {
+  if (!ledgerList) return;
+  const path = withPageParams(ledgerListQuery(), ledgerPaginator.params());
+  const { data, error } = await apiRequest("GET", path);
+  const oldBtn = ledgerList.querySelector(".load-more-row");
+  if (oldBtn) oldBtn.remove();
+  if (error) {
+    if (!append) ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`;
+    return;
+  }
   const customers = data?.customers || [];
-  if (!customers.length) {
+  ledgerPaginator.absorb(data?.pagination);
+  if (!append) ledgerList.innerHTML = "";
+  if (!customers.length && !append) {
+    const q = (ledgerSearchInput?.value || "").trim();
+    const overdue = ledgerFilter?.value === "overdue";
     ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${
       overdue || q ? "No accounts match this filter." : "No outstanding balances. Order totals post here automatically."
     }</p>`;
     return;
   }
-  ledgerList.innerHTML = "";
   customers.forEach((c) => ledgerList.appendChild(ledgerCard(c)));
+  if (ledgerPaginator.hasMore) ledgerList.appendChild(ledgerLoadMoreRow());
+}
+
+function ledgerLoadMoreRow() {
+  const row = document.createElement("div");
+  row.className = "load-more-row";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "button ghost";
+  const remaining = Math.max(0, ledgerPaginator.total - ledgerPaginator.offset);
+  btn.textContent = remaining > 0 ? `Load more (${remaining} more)` : "Load more";
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    btn.textContent = "Loading…";
+    loadMoreLedger();
+  });
+  row.appendChild(btn);
+  return row;
 }
 
 function ledgerCard(c) {
