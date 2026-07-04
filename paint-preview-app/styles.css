@@ -1022,3 +1022,164 @@ body {
   border: 1px solid var(--line);
   font-size: 0.82rem;
 }
+
+/* ===================== Phase 6: Quotes & Orders ===================== */
+
+.doc-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.doc-card:hover { border-color: var(--accent); }
+.doc-card .doc-number { font-weight: 600; }
+.doc-card .doc-sub { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+.doc-card .doc-right { text-align: right; }
+.doc-card .doc-total { font-weight: 600; }
+
+.status-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+.status-badge.draft { background: #ece8dd; color: #6b675e; }
+.status-badge.sent { background: #e3edf7; color: #2b6299; border-color: #cfe0f0; }
+.status-badge.accepted,
+.status-badge.confirmed { background: #e3f2e6; color: #2f7d43; border-color: #cbe6d1; }
+.status-badge.rejected,
+.status-badge.cancelled { background: #f7e2df; color: #a5372a; border-color: #eecbc5; }
+.status-badge.converted,
+.status-badge.fulfilled { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
+.status-badge.pending { background: #f6efd8; color: #8a6d1e; border-color: #ece0bb; }
+
+.section-label {
+  margin: 18px 0 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.quote-items-head,
+.quote-item-row {
+  display: grid;
+  grid-template-columns: 1fr 70px 90px 90px 32px;
+  gap: 8px;
+  align-items: center;
+}
+.quote-items-head {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  padding: 0 2px 4px;
+}
+.quote-items-head span:nth-child(2),
+.quote-items-head span:nth-child(3),
+.quote-items-head span:nth-child(4) { text-align: right; }
+
+.quote-item-row { margin-bottom: 6px; }
+.quote-item-row input {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+.quote-item-row input.qi-qty,
+.quote-item-row input.qi-price { text-align: right; }
+.quote-item-row .qi-line {
+  text-align: right;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.quote-item-row .qi-remove {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 4px;
+}
+.quote-item-row .qi-remove:hover { color: var(--accent); }
+.qi-desc-wrap { display: flex; flex-direction: column; gap: 3px; }
+.qi-brand {
+  font-size: 0.72rem !important;
+  padding: 4px 8px !important;
+  color: var(--muted);
+}
+
+.quote-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 4px;
+}
+
+.quote-totals {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.quote-totals .t-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  padding: 3px 0;
+}
+.quote-totals .t-row.grand {
+  font-weight: 700;
+  font-size: 1.05rem;
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 8px;
+}
+.quote-totals .t-row span:last-child { font-variant-numeric: tabular-nums; }
+
+.form-error {
+  color: var(--accent);
+  font-size: 0.85rem;
+  min-height: 1.2em;
+  margin: 8px 0 0;
+}
+
+.doc-detail-items {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 12px;
+  font-size: 0.88rem;
+}
+.doc-detail-items th,
+.doc-detail-items td {
+  text-align: left;
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.doc-detail-items th:not(:first-child),
+.doc-detail-items td:not(:first-child) { text-align: right; }
+.doc-detail-items td { font-variant-numeric: tabular-nums; }
+
+.doc-status-select {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  margin-right: auto;
+}

@@ -602,6 +602,75 @@ CREATE INDEX idx_events_type ON events(event_type);
 CREATE INDEX idx_events_ts ON events(ts);
 CREATE INDEX idx_events_tenant_ts ON events(tenant_id, ts);
 CREATE INDEX idx_events_tenant_type_ts ON events(tenant_id, event_type, ts);
+
+-- Phase 5 (CRM Lite): customers, sites, and preview_sessions link the decision
+-- flow to a durable customer record (migration 006). Leads gain customer_id/site_id.
+
+-- Phase 6 (Commercial Modules): quotes -> orders (migration 007)
+CREATE TABLE quotes (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id  UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  site_id      UUID REFERENCES sites(id) ON DELETE SET NULL,
+  quote_number VARCHAR(32) NOT NULL,          -- per-tenant sequential, e.g. Q-0001
+  status       VARCHAR(32) NOT NULL DEFAULT 'draft', -- draft|sent|accepted|rejected|converted
+  currency     VARCHAR(8)  NOT NULL DEFAULT 'INR',
+  notes        TEXT DEFAULT '',
+  discount     NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_rate     NUMERIC(5,2)  NOT NULL DEFAULT 0,     -- percent
+  subtotal     NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_amount   NUMERIC(12,2) NOT NULL DEFAULT 0,
+  total        NUMERIC(12,2) NOT NULL DEFAULT 0,
+  valid_until  DATE,
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (tenant_id, quote_number)
+);
+CREATE INDEX idx_quotes_tenant ON quotes(tenant_id);
+CREATE INDEX idx_quotes_tenant_customer ON quotes(tenant_id, customer_id);
+CREATE INDEX idx_quotes_tenant_status ON quotes(tenant_id, status);
+
+CREATE TABLE quote_items (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  quote_id    UUID NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+  shade_id    VARCHAR(64) DEFAULT '',   -- soft link to shades.id (no FK; offline-safe)
+  description VARCHAR(255) NOT NULL,
+  brand       VARCHAR(120) DEFAULT '',
+  unit        VARCHAR(32) DEFAULT 'litre',
+  quantity    NUMERIC(12,2) NOT NULL DEFAULT 1,
+  unit_price  NUMERIC(12,2) NOT NULL DEFAULT 0,
+  line_total  NUMERIC(12,2) NOT NULL DEFAULT 0,  -- always derived server-side
+  sort_order  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_quote_items_quote ON quote_items(quote_id);
+
+-- orders + order_items mirror quotes/quote_items; an order snapshots the quote at
+-- conversion time (quote_id links back, ON DELETE SET NULL). Same unique/index layout.
+CREATE TABLE orders (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id  UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  site_id      UUID REFERENCES sites(id) ON DELETE SET NULL,
+  quote_id     UUID REFERENCES quotes(id) ON DELETE SET NULL,
+  order_number VARCHAR(32) NOT NULL,          -- per-tenant sequential, e.g. O-0001
+  status       VARCHAR(32) NOT NULL DEFAULT 'pending', -- pending|confirmed|fulfilled|cancelled
+  currency     VARCHAR(8)  NOT NULL DEFAULT 'INR',
+  notes        TEXT DEFAULT '',
+  discount     NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_rate     NUMERIC(5,2)  NOT NULL DEFAULT 0,
+  subtotal     NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_amount   NUMERIC(12,2) NOT NULL DEFAULT 0,
+  total        NUMERIC(12,2) NOT NULL DEFAULT 0,
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (tenant_id, order_number)
+);
+CREATE INDEX idx_orders_tenant ON orders(tenant_id);
+CREATE INDEX idx_orders_tenant_customer ON orders(tenant_id, customer_id);
+CREATE INDEX idx_orders_tenant_status ON orders(tenant_id, status);
+CREATE INDEX idx_orders_quote ON orders(quote_id);
+-- order_items: identical columns to quote_items with order_id FK + idx_order_items_order
 ```
 
 ### 4.4 API Route Reference
@@ -652,6 +721,46 @@ Search is a four-column LIKE across `name`, `brand`, `collection`, `color_family
 | GET | `/` | ✓ | — | last 500 raw events |
 
 Valid `eventType` values: `session_start`, `shade_selected`, `share_exported`, `contact_opened`, `contact_saved`, `page_load`.
+
+#### Quotes (`/api/quotes`) — Phase 6
+
+| Method | Path | Auth | Body / Params | Response |
+|--------|------|------|--------------|----------|
+| GET | `/` | ✓ | `?customerId=&status=` | `{quotes[]}` (with `itemCount`, no items) |
+| POST | `/` | ✓ | `{customerId, siteId?, items[], taxRate?, discount?, notes?, validUntil?, status?}` | `{quote}` — 201 |
+| GET | `/:id` | ✓ | — | `{quote}` (with `items[]`) |
+| PUT | `/:id` | ✓ | same as POST (header + full item replace) | `{quote}` |
+| PATCH | `/:id/status` | ✓ | `{status}` (draft/sent/accepted/rejected) | `{quote}` |
+| POST | `/:id/convert` | ✓ | — | `{order}` — 201; 409 if already converted |
+| DELETE | `/:id` | ✓ | — | `{ok: true}` |
+
+Each `items[]` entry: `{description, quantity, unitPrice, brand?, unit?, shadeId?, sortOrder?}`.
+
+#### Orders (`/api/orders`) — Phase 6
+
+| Method | Path | Auth | Body / Params | Response |
+|--------|------|------|--------------|----------|
+| GET | `/` | ✓ | `?customerId=&status=` | `{orders[]}` (with `itemCount`) |
+| POST | `/` | ✓ | `{customerId, siteId?, items[], taxRate?, discount?, notes?, status?}` | `{order}` — 201 |
+| GET | `/:id` | ✓ | — | `{order}` (with `items[]`) |
+| PATCH | `/:id/status` | ✓ | `{status}` (pending/confirmed/fulfilled/cancelled) | `{order}` |
+| DELETE | `/:id` | ✓ | — | `{ok: true}` |
+
+**Totals math (`lib/quotes.js`, authoritative — client values ignored):**
+
+```
+line_total   = round2(quantity * unit_price)          # per item
+subtotal     = round2(Σ line_total)
+discountBase = max(0, round2(subtotal - discount))
+tax_amount   = round2(discountBase * tax_rate / 100)
+total        = round2(discountBase + tax_amount)
+```
+
+Creation, full update, and conversion run inside `withTransaction`. Document numbers
+are generated per-tenant as `prefix + max(numeric suffix so far)+1`, zero-padded to 4
+digits (resilient to deletions), and guarded by a `UNIQUE (tenant_id, number)` constraint.
+Converting a quote snapshots its items + totals into a new order and sets the quote to
+`converted` (thereafter read-only).
 
 ### 4.5 Funnel Analytics Query Design
 
@@ -1273,7 +1382,7 @@ export default function () {
 | 3 | Done | Analytics event system, local dashboard, dealer branding |
 | 4 | **Done** | PostgreSQL backend with connection pooling, JWT auth, Docker containerization, CI/CD, monitoring stack |
 | 5 | **Done** | Customer CRM (CRUD), site/project model, preview session linked to customer timeline |
-| 6 | Planned | Quote → order flow, inventory stock status, credit ledger, payment reminders |
+| 6 | **In progress** | Quote → order flow (done): quotes/orders schema, server-computed totals, per-tenant document numbers, transactional conversion. Inventory stock status + credit ledger next |
 | 7 | Planned | AI palette recommendations (style/mood/season), dealer assistant prompts (LLM) |
 | 8 | Future | Contractor assignment, customer-facing app, marketplace mechanics |
 
@@ -1289,4 +1398,4 @@ export default function () {
 
 ---
 
-*Last updated: Jul 3, 2026 — Phase 5 (CRM Lite) complete; Phase 6 next*
+*Last updated: Jul 3, 2026 — Phase 6 quote → order flow complete (inventory + credit ledger next)*

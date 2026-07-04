@@ -114,10 +114,21 @@ Phase 5 - CRM Lite (Done — Jul 2026)
 - Backend: /api/customers, /api/customers/:id/timeline, /api/sites, /api/sessions
 - Full Jest suite (56 tests) green against PostgreSQL; coverage >70%
 
-Phase 6 - Commercial Modules
-- Quote -> order basic flow
-- Inventory basics and stock status
-- Credit ledger v1 and reminder actions
+Phase 6 - Commercial Modules (In progress)
+- Quote -> order basic flow (Done — Jul 2026)
+  - quotes/quote_items + orders/order_items tables (migration 007), per-tenant sequential
+    document numbers (Q-0001 / O-0001)
+  - Backend: /api/quotes (list/create/read/update/delete, PATCH status, POST convert) and
+    /api/orders (list/create/read/delete, PATCH status)
+  - Totals computed server-side: line_total = qty x unit_price; subtotal; discount on subtotal;
+    tax as % of discounted base; total. Client line totals are never trusted.
+  - Convert = snapshot quote items + totals into a new order, lock quote as 'converted'
+  - Frontend: Quotes button -> Quotes/Orders tabbed modal, quote builder (customer/site,
+    line items from catalog or manual, discount/tax, live totals), detail view with status
+    controls and Convert to Order. Requires sign-in.
+  - Jest: quotes.test.js + orders.test.js (backend suite now 75 tests, coverage >70%)
+- Inventory basics and stock status (Next)
+- Credit ledger v1 and reminder actions (Next)
 
 Phase 7 - AI and Differentiation
 - Better palette recommendations (style/mood)

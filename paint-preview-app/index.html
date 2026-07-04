@@ -26,6 +26,7 @@
             <button id="contactBtn" class="button primary" disabled>Contact Dealer</button>
             <button id="leadsBtn" class="button ghost" disabled>Leads <span id="leadsCount">0</span></button>
             <button id="customersBtn" class="button ghost" title="CRM — sign in required">Customers</button>
+            <button id="quotesBtn" class="button ghost" title="Quotes &amp; Orders — sign in required">Quotes</button>
             <button id="settingsBtn" class="button ghost">Settings</button>
             <button id="restoreDraftBtn" class="button ghost" style="display:none">Restore draft</button>
             <button id="clearSessionBtn" class="button ghost" style="display:none">New session</button>
@@ -484,6 +485,113 @@
             <button type="submit" class="button primary">Save Site</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Phase 6: Commercial Modules — Quotes & Orders -->
+    <div id="quotesModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="quotesTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="quotesTitle">Quotes &amp; Orders</h3>
+          <button id="closeQuotesBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="quotesSignInPrompt" class="muted" style="padding:12px;display:none;">
+          Sign in via Settings → Server Sync to create quotes and convert them to orders.
+        </div>
+
+        <div id="quotesPanel">
+          <div class="modal-tabs">
+            <button class="modal-tab active" id="quotesTabBtn">Quotes</button>
+            <button class="modal-tab" id="ordersTabBtn">Orders</button>
+          </div>
+
+          <div class="crm-toolbar">
+            <select id="docStatusFilter" class="crm-search"></select>
+            <button type="button" id="newQuoteBtn" class="button tiny primary">+ New Quote</button>
+          </div>
+
+          <div id="docList" class="leads-list"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="closeQuotes2Btn" class="button ghost">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="quoteFormModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="quoteFormTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="quoteFormTitle">New Quote</h3>
+          <button id="closeQuoteFormBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <form id="quoteForm">
+          <div class="form-grid">
+            <label class="field">
+              <span>Customer <span class="req">*</span></span>
+              <select id="quoteCustomerSelect" required></select>
+            </label>
+            <label class="field">
+              <span>Site / project</span>
+              <select id="quoteSiteSelect"><option value="">No site</option></select>
+            </label>
+          </div>
+
+          <h4 class="section-label">Line items</h4>
+          <div class="quote-items-head">
+            <span>Description</span>
+            <span>Qty</span>
+            <span>Unit ₹</span>
+            <span>Total</span>
+            <span></span>
+          </div>
+          <div id="quoteItemsList" class="quote-items"></div>
+
+          <div class="quote-add-row">
+            <select id="quoteShadePicker" class="crm-search">
+              <option value="">Add a shade from the catalog…</option>
+            </select>
+            <button type="button" id="addQuoteItemBtn" class="button tiny ghost">+ Blank line</button>
+          </div>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>Discount (₹)</span>
+              <input id="quoteDiscount" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Tax rate (%)</span>
+              <input id="quoteTaxRate" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field full">
+              <span>Notes</span>
+              <textarea id="quoteNotes" rows="2" placeholder="Payment terms, validity, etc."></textarea>
+            </label>
+          </div>
+
+          <div id="quoteTotals" class="quote-totals"></div>
+          <p id="quoteFormError" class="form-error"></p>
+
+          <div class="modal-actions">
+            <button type="button" id="cancelQuoteFormBtn" class="button ghost">Cancel</button>
+            <button type="submit" id="saveQuoteBtn" class="button primary">Save Quote</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="docDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="docDetailTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="docDetailTitle">Quote</h3>
+          <button id="closeDocDetailBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="docDetailBody" class="lead-detail-body"></div>
+
+        <div class="modal-actions" id="docDetailActions"></div>
       </div>
     </div>
 

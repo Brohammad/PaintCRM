@@ -142,6 +142,28 @@ When signed in to the backend:
 - **Lead → customer** — jump from a lead to its linked customer profile
 - **Offline cache** — last-synced customers stay viewable offline; writes require sign-in
 
+### Phase 6 — Commercial Modules (in progress)
+
+Quote → order flow for signed-in dealers.
+
+| Endpoint | What it does |
+|----------|-------------|
+| `GET/POST /api/quotes` | List (filter by `?customerId=` / `?status=`) and create quotes with line items |
+| `GET/PUT/DELETE /api/quotes/:id` | Read, replace (header + items), and delete a quote |
+| `PATCH /api/quotes/:id/status` | Move a quote through draft → sent → accepted / rejected |
+| `POST /api/quotes/:id/convert` | Create an order from the quote and lock the quote as `converted` |
+| `GET/POST /api/orders` | List and create orders (direct or via conversion) |
+| `GET/DELETE /api/orders/:id` | Read and delete an order |
+| `PATCH /api/orders/:id/status` | Move an order through pending → confirmed → fulfilled / cancelled |
+
+- **Quotes** button in the app — a Quotes / Orders tabbed modal with a status filter
+- **Quote builder** — pick a customer + site, add line items manually or from the shade catalog (auto-fills price/L and standard-room litres), set discount and tax rate, live totals
+- **Server-computed totals** — subtotal, discount, tax, and total are always recomputed on the server (line totals are never trusted from the client)
+- **Per-tenant document numbers** — sequential `Q-0001` / `O-0001`, isolated per dealer
+- **Convert to order** — one click turns an accepted quote into an order (items + totals snapshotted); the quote is then read-only
+- **Status workflows** — inline status controls on the quote/order detail view
+- Requires sign-in (commercial data is server-only; the offline decision flow is unaffected)
+
 ---
 
 ## User flow (demo script)
@@ -203,7 +225,7 @@ curl -s -X POST http://localhost:3001/api/auth/register \
 | 3 | Done | Pilot validation — analytics engine, dealer branding, KPI dashboard |
 | 4 | Done | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking, Docker, CI |
 | 5 | Done | CRM Lite — customer CRUD, sites/projects, session timeline (server sync) |
-| 6 | Planned | Quoting, inventory, credit ledger |
+| 6 | In progress | Commercial modules — quote → order flow (inventory & credit ledger next) |
 | 7+ | Future | AI palette recommendations, dealer assistant |
 
 See [`master-plan.txt`](master-plan.txt) for the full execution plan with sprint breakdowns and success metrics.
