@@ -179,6 +179,23 @@ Inventory basics + stock status:
 - **Catalog link** — optionally link an item to a shade to auto-fill name/brand/price
 - **Per-tenant SKUs** — optional, uniquely enforced only when provided
 
+Credit ledger + payment reminders:
+
+| Endpoint | What it does |
+|----------|-------------|
+| `GET /api/ledger/summary` | Tenant-wide receivables snapshot (receivable, overdue amount, debtor counts) |
+| `GET /api/ledger/customers` | Customers with an outstanding balance (`?overdue=true`, `?q=` search) |
+| `GET /api/ledger/customers/:id` | Full statement — balance, overdue state, entries + reminders |
+| `POST /api/ledger/customers/:id/entries` | Record a debit (charge) or credit (payment) |
+| `POST /api/ledger/customers/:id/reminders` | Log a payment reminder action (with balance snapshot) |
+
+- **Ledger** button — receivables summary chips, an "everyone who owes / overdue only" filter, and a searchable debtor worklist
+- **Append-only account** — every debit/credit stores the running balance after it was applied, so a statement renders without re-summing
+- **Order totals post automatically** — creating (or converting to) an order writes a debit to the customer's account; deleting the order writes a compensating reversal so balances stay correct
+- **Overdue flags** — a customer is overdue when they owe money and a dated charge is past due; overdue accounts sort to the top of the worklist
+- **Reminder actions** — log a WhatsApp / call / SMS / email follow-up; each is timestamped with the balance at the time
+- Requires sign-in (commercial data is server-only)
+
 ---
 
 ## User flow (demo script)
@@ -240,7 +257,7 @@ curl -s -X POST http://localhost:3001/api/auth/register \
 | 3 | Done | Pilot validation — analytics engine, dealer branding, KPI dashboard |
 | 4 | Done | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking, Docker, CI |
 | 5 | Done | CRM Lite — customer CRUD, sites/projects, session timeline (server sync) |
-| 6 | In progress | Commercial modules — quote → order flow + inventory/stock status (credit ledger next) |
+| 6 | In progress | Commercial modules — quote → order flow, inventory/stock status, credit ledger + payment reminders |
 | 7+ | Future | AI palette recommendations, dealer assistant |
 
 See [`master-plan.txt`](master-plan.txt) for the full execution plan with sprint breakdowns and success metrics.

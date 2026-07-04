@@ -1,5 +1,5 @@
 const express = require('express');
-const { query } = require('../lib/db');
+const { query, withTransaction } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
 const {
   ORDER_STATUSES,
@@ -7,6 +7,7 @@ const {
   getOrderWithItems,
   formatOrder,
 } = require('../lib/quotes');
+const { reverseOrderPosting } = require('../lib/ledger');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -66,7 +67,7 @@ router.get('/', async (req, res, next) => {
 // POST /api/orders — create an order directly (not from a quote)
 router.post('/', async (req, res, next) => {
   try {
-    const { customerId, siteId, status, notes, taxRate, discount, items } = req.body || {};
+    const { customerId, siteId, status, notes, taxRate, discount, items, dueDate } = req.body || {};
 
     if (!(await assertCustomer(req.tenant.id, customerId))) {
       return res.status(404).json({ error: 'Customer not found' });
@@ -84,6 +85,7 @@ router.post('/', async (req, res, next) => {
       taxRate,
       discount,
       items,
+      dueDate,
     });
 
     res.status(201).json({ order });
@@ -131,14 +133,25 @@ router.patch('/:id/status', async (req, res, next) => {
   }
 });
 
-// DELETE /api/orders/:id
+// DELETE /api/orders/:id — also reverses the order's posting to the ledger
 router.delete('/:id', async (req, res, next) => {
   try {
-    const result = await query(
-      'DELETE FROM orders WHERE id = $1 AND tenant_id = $2 RETURNING id',
-      [req.params.id, req.tenant.id]
-    );
-    if (result.rowCount === 0) {
+    const deleted = await withTransaction(async (client) => {
+      const found = await client.query(
+        'SELECT id, customer_id, order_number FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+        [req.params.id, req.tenant.id]
+      );
+      if (found.rows.length === 0) return false;
+
+      await reverseOrderPosting(client, req.tenant.id, found.rows[0]);
+      await client.query('DELETE FROM orders WHERE id = $1 AND tenant_id = $2', [
+        req.params.id,
+        req.tenant.id,
+      ]);
+      return true;
+    });
+
+    if (!deleted) {
       return res.status(404).json({ error: 'Order not found' });
     }
     res.json({ ok: true });

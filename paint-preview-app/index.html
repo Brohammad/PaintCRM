@@ -28,6 +28,7 @@
             <button id="customersBtn" class="button ghost" title="CRM — sign in required">Customers</button>
             <button id="quotesBtn" class="button ghost" title="Quotes &amp; Orders — sign in required">Quotes</button>
             <button id="inventoryBtn" class="button ghost" title="Inventory — sign in required">Inventory</button>
+            <button id="ledgerBtn" class="button ghost" title="Credit ledger &amp; reminders — sign in required">Ledger</button>
             <button id="settingsBtn" class="button ghost">Settings</button>
             <button id="restoreDraftBtn" class="button ghost" style="display:none">Restore draft</button>
             <button id="clearSessionBtn" class="button ghost" style="display:none">New session</button>
@@ -700,6 +701,51 @@
           <button id="deleteInventoryBtn" class="button ghost danger">Delete</button>
           <button id="editInventoryBtn" class="button ghost">Edit</button>
           <button id="closeInventoryDetail2Btn" class="button primary">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 6: Credit Ledger & Payment Reminders -->
+    <div id="ledgerModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ledgerTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="ledgerTitle">Credit Ledger</h3>
+          <button id="closeLedgerBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="ledgerSignInPrompt" class="muted" style="padding:12px;display:none;">
+          Sign in via Settings → Server Sync to track customer credit, payments, and reminders.
+        </div>
+
+        <div id="ledgerPanel">
+          <div id="ledgerSummary" class="inv-summary"></div>
+          <div class="crm-toolbar">
+            <input id="ledgerSearchInput" type="search" placeholder="Search customer name or phone…" class="crm-search" />
+            <select id="ledgerFilter" class="crm-search" style="flex:0 0 auto;">
+              <option value="">Everyone who owes</option>
+              <option value="overdue">Overdue only</option>
+            </select>
+          </div>
+          <div id="ledgerList" class="leads-list"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="closeLedger2Btn" class="button ghost">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="ledgerDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ledgerDetailTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="ledgerDetailTitle">Account</h3>
+          <button id="closeLedgerDetailBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="ledgerDetailBody" class="lead-detail-body"></div>
+
+        <div class="modal-actions">
+          <button id="closeLedgerDetail2Btn" class="button primary">Done</button>
         </div>
       </div>
     </div>

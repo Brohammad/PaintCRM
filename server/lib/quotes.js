@@ -1,4 +1,5 @@
 const { query, withTransaction } = require('./db');
+const { postOrderDebit } = require('./ledger');
 
 const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'converted'];
 const ORDER_STATUSES = ['pending', 'confirmed', 'fulfilled', 'cancelled'];
@@ -233,6 +234,15 @@ async function convertQuoteToOrder(tenantId, quoteId) {
       [quoteId]
     );
 
+    // Post the order total to the customer's credit ledger.
+    await postOrderDebit(client, tenantId, {
+      id: orderId,
+      customer_id: quote.customer_id,
+      order_number: number,
+      total: quote.total,
+      due_date: quote.valid_until || null,
+    });
+
     return { orderId };
   });
 
@@ -272,6 +282,18 @@ async function createOrder(tenantId, input) {
     );
     const id = inserted.rows[0].id;
     await insertItems(client, tenantId, 'order_items', 'order_id', id, items);
+
+    // Post the order total to the customer's credit ledger (cancelled orders
+    // never hit the account).
+    if (status !== 'cancelled') {
+      await postOrderDebit(client, tenantId, {
+        id,
+        customer_id: input.customerId,
+        order_number: number,
+        total: totals.total,
+        due_date: input.dueDate || null,
+      });
+    }
     return id;
   });
 

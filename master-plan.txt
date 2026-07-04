@@ -138,7 +138,21 @@ Phase 6 - Commercial Modules (In progress)
   - Frontend: Inventory button -> item list (search + status filter + summary chips), item
     form (catalog-linked), detail view with receive/issue adjust controls and movement log
   - Jest: inventory.test.js (backend suite now 90 tests, coverage >70%)
-- Credit ledger v1 and reminder actions (Next)
+- Credit ledger v1 and payment reminders (Done — Jul 2026)
+  - ledger_entries + payment_reminders tables (migration 009); append-only per-customer
+    account of debits (charges / order totals) and credits (payments / adjustments), each
+    row storing the running balance after it was applied
+  - Balance convention: positive = customer owes; negative = advance/credit. Balance is
+    recomputed under a per-customer row lock so concurrent posts stay consistent.
+  - Order totals post automatically: creating (or converting to) an order writes a debit;
+    deleting the order writes a compensating reversal credit (ledger stays append-only)
+  - Overdue = owes money AND a dated debit is past due; overdue accounts sort first
+  - Backend: GET /api/ledger/summary (receivables snapshot), GET /api/ledger/customers
+    (debtor worklist, ?overdue=true / ?q=), GET /api/ledger/customers/:id (statement),
+    POST /:id/entries (debit/credit), POST /:id/reminders (log follow-up + balance snapshot)
+  - Frontend: Ledger button -> summary chips + debtor worklist (search + overdue filter),
+    account detail with record-payment / add-charge / log-reminder controls and statement
+  - Jest: ledger.test.js (backend suite now 104 tests, coverage >70%)
 
 Phase 7 - AI and Differentiation
 - Better palette recommendations (style/mood)

@@ -705,10 +705,48 @@ CREATE TABLE inventory_movements (
 );
 CREATE INDEX idx_inv_moves_item ON inventory_movements(item_id);
 CREATE INDEX idx_inv_moves_tenant_ts ON inventory_movements(tenant_id, created_at);
+
+-- Phase 6 (Credit Ledger): per-customer account + reminder audit log (migration 009)
+CREATE TABLE ledger_entries (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id     UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  entry_type      VARCHAR(16) NOT NULL,               -- 'debit' | 'credit' (CHECK)
+  amount          NUMERIC(12,2) NOT NULL,             -- always positive (CHECK amount >= 0)
+  source          VARCHAR(32) NOT NULL DEFAULT 'manual', -- order|payment|manual|adjustment|reversal
+  reference_id    UUID,                               -- soft link to an order (survives deletion)
+  reference_label VARCHAR(64) NOT NULL DEFAULT '',    -- e.g. 'O-0001'
+  note            TEXT DEFAULT '',
+  due_date        DATE,                               -- for debits; drives overdue flags
+  balance_after   NUMERIC(12,2) NOT NULL,             -- running per-customer balance snapshot
+  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_ledger_tenant ON ledger_entries(tenant_id);
+CREATE INDEX idx_ledger_tenant_cust_ts ON ledger_entries(tenant_id, customer_id, created_at);
+CREATE INDEX idx_ledger_reference ON ledger_entries(reference_id);
+
+CREATE TABLE payment_reminders (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id         UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  channel             VARCHAR(32) NOT NULL DEFAULT 'manual', -- manual|call|sms|whatsapp|email
+  note                TEXT DEFAULT '',
+  balance_at_reminder NUMERIC(12,2) NOT NULL DEFAULT 0,      -- outstanding balance snapshot
+  created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_reminders_tenant_cust_ts ON payment_reminders(tenant_id, customer_id, created_at);
 ```
 
 **Stock status** is derived (never stored): `out_of_stock` when `quantity <= 0`,
 `low_stock` when `reorder_level > 0 AND quantity <= reorder_level`, else `in_stock`.
+
+**Credit balance** is a customer's amount owed: `SUM(debit) - SUM(credit)` (positive =
+owes, negative = advance). It is never stored on the customer — each ledger row snapshots
+the running `balance_after`, computed under a per-customer row lock (`SELECT … FOR UPDATE`)
+so concurrent posts stay consistent. A customer is **overdue** when the balance is positive
+and a dated debit is past due. Order totals post a `source='order'` debit inside the order
+transaction; deleting an order writes a compensating `source='reversal'` credit for the net
+outstanding amount so balances remain correct without mutating history.
 
 ### 4.4 API Route Reference
 
@@ -815,6 +853,23 @@ On-hand quantity changes **only** through `POST /:id/adjust`, which runs in a tr
 (`SELECT … FOR UPDATE`), rejects a resulting negative balance, and writes an
 `inventory_movements` row with the running `balance_after`. Item creation records an
 "Opening stock" movement when the opening quantity is non-zero.
+
+#### Credit Ledger (`/api/ledger`) — Phase 6
+
+| Method | Path | Auth | Body / Params | Response |
+|--------|------|------|--------------|----------|
+| GET | `/summary` | ✓ | — | `{summary:{receivable,advances,debtors,overdueCustomers,overdueAmount}}` |
+| GET | `/customers` | ✓ | `?overdue=true&q=<search>` | `{customers[]}` — outstanding balances, overdue sorted first |
+| GET | `/customers/:id` | ✓ | — | `{ledger:{balance, overdue, entries[], reminders[], …}}` |
+| POST | `/customers/:id/entries` | ✓ | `{entryType:'debit'\|'credit', amount, note?, dueDate?, source?}` | `{entry, ledger}` — 201 |
+| POST | `/customers/:id/reminders` | ✓ | `{channel?, note?}` | `{reminder, balance}` — 201 |
+
+Ledger writes run in a transaction that locks the customer row (`SELECT … FOR UPDATE`),
+recomputes the balance from `SUM(debit) - SUM(credit)`, and appends a row with the new
+`balance_after` (`lib/ledger.js#postEntry`). Order creation/conversion posts a `source='order'`
+debit via `postOrderDebit` inside the order transaction; order deletion posts a
+`source='reversal'` credit via `reverseOrderPosting`. Manual entries are restricted to the
+`manual` / `payment` / `adjustment` sources; `order` / `reversal` are system-only.
 
 ### 4.5 Funnel Analytics Query Design
 
@@ -1436,7 +1491,7 @@ export default function () {
 | 3 | Done | Analytics event system, local dashboard, dealer branding |
 | 4 | **Done** | PostgreSQL backend with connection pooling, JWT auth, Docker containerization, CI/CD, monitoring stack |
 | 5 | **Done** | Customer CRM (CRUD), site/project model, preview session linked to customer timeline |
-| 6 | **In progress** | Quote → order flow + inventory/stock status (done): commerce + inventory schema, server-computed totals, transactional conversion, auditable stock movements. Credit ledger next |
+| 6 | **In progress** | Quote → order flow, inventory/stock status, and credit ledger + payment reminders (done): commerce + inventory + ledger schema, server-computed totals, transactional conversion, auditable stock movements, append-only per-customer account with auto-posted order totals and overdue reminders |
 | 7 | Planned | AI palette recommendations (style/mood/season), dealer assistant prompts (LLM) |
 | 8 | Future | Contractor assignment, customer-facing app, marketplace mechanics |
 
@@ -1452,4 +1507,4 @@ export default function () {
 
 ---
 
-*Last updated: Jul 4, 2026 — Phase 6 quote → order flow + inventory/stock status complete (credit ledger next)*
+*Last updated: Jul 4, 2026 — Phase 6 quote → order flow, inventory/stock status, and credit ledger + payment reminders complete*

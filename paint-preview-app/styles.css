@@ -1268,3 +1268,42 @@ body {
 .inv-movements th:nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
 .inv-movements .pos { color: #2f7d43; }
 .inv-movements .neg { color: #a5372a; }
+
+/* Phase 6: Credit Ledger */
+.inv-card .qty small { display: block; font-weight: 400; color: var(--muted); }
+.ledger-owes { color: #a5372a; }
+.ledger-credit { color: #2f7d43; }
+
+.ledger-entry-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ledger-entry-row input,
+.ledger-entry-row select {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+.ledger-entry-row .inv-delta { width: 130px; text-align: right; }
+.ledger-entry-row .inv-reason { flex: 1; min-width: 140px; }
+.ledger-entry-row .ledger-due { flex: 0 0 auto; }
+.ledger-entry-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+.ledger-reminders {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ledger-reminders li {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.ledger-reminders li .status-badge { margin-right: 6px; }

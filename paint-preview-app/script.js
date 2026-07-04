@@ -165,6 +165,25 @@ let editingInventoryId = null;
 let currentInventoryId = null;
 let currentInventoryObj = null;
 
+// Phase 6 credit-ledger elements
+const ledgerBtn = document.getElementById("ledgerBtn");
+const ledgerModal = document.getElementById("ledgerModal");
+const ledgerSignInPrompt = document.getElementById("ledgerSignInPrompt");
+const ledgerPanel = document.getElementById("ledgerPanel");
+const ledgerSummary = document.getElementById("ledgerSummary");
+const ledgerSearchInput = document.getElementById("ledgerSearchInput");
+const ledgerFilter = document.getElementById("ledgerFilter");
+const ledgerList = document.getElementById("ledgerList");
+const closeLedgerBtn = document.getElementById("closeLedgerBtn");
+const closeLedger2Btn = document.getElementById("closeLedger2Btn");
+const ledgerDetailModal = document.getElementById("ledgerDetailModal");
+const ledgerDetailTitle = document.getElementById("ledgerDetailTitle");
+const ledgerDetailBody = document.getElementById("ledgerDetailBody");
+const closeLedgerDetailBtn = document.getElementById("closeLedgerDetailBtn");
+const closeLedgerDetail2Btn = document.getElementById("closeLedgerDetail2Btn");
+
+let currentLedgerCustomerId = null;
+
 const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
 const compareCanvas = document.getElementById("compareCanvas");
@@ -3527,6 +3546,231 @@ async function deleteCurrentInventory() {
   renderInventoryList();
 }
 
+/* ===================== Phase 6: Credit Ledger & Reminders ===================== */
+
+const LEDGER_SOURCE_LABELS = {
+  order: "Order",
+  payment: "Payment",
+  manual: "Manual",
+  adjustment: "Adjustment",
+  reversal: "Reversal",
+};
+const REMINDER_CHANNEL_LABELS = {
+  manual: "Logged",
+  call: "Call",
+  sms: "SMS",
+  whatsapp: "WhatsApp",
+  email: "Email",
+};
+
+function openLedgerModal() {
+  if (!ledgerModal) return;
+  const signedIn = !!getApiToken();
+  if (ledgerSignInPrompt) ledgerSignInPrompt.style.display = signedIn ? "none" : "block";
+  if (ledgerPanel) ledgerPanel.style.display = signedIn ? "block" : "none";
+  ledgerModal.classList.remove("hidden");
+  if (signedIn) {
+    renderLedgerSummary();
+    renderLedgerList();
+  }
+}
+
+function closeLedgerModal() {
+  if (ledgerModal) ledgerModal.classList.add("hidden");
+}
+
+async function renderLedgerSummary() {
+  if (!ledgerSummary) return;
+  const { data, error } = await apiRequest("GET", "/api/ledger/summary");
+  if (error || !data?.summary) { ledgerSummary.innerHTML = ""; return; }
+  const s = data.summary;
+  ledgerSummary.innerHTML = `
+    <div class="inv-chip"><div class="n">${fmtMoney(s.receivable)}</div><div class="l">Receivable</div></div>
+    <div class="inv-chip out"><div class="n">${fmtMoney(s.overdueAmount)}</div><div class="l">Overdue</div></div>
+    <div class="inv-chip"><div class="n">${s.debtors}</div><div class="l">Owe you</div></div>
+    <div class="inv-chip low"><div class="n">${s.overdueCustomers}</div><div class="l">Overdue</div></div>`;
+}
+
+async function renderLedgerList() {
+  if (!ledgerList) return;
+  ledgerList.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  const q = (ledgerSearchInput?.value || "").trim();
+  const overdue = ledgerFilter?.value === "overdue";
+  const params = [];
+  if (q) params.push(`q=${encodeURIComponent(q)}`);
+  if (overdue) params.push("overdue=true");
+  const qs = params.length ? `?${params.join("&")}` : "";
+
+  const { data, error } = await apiRequest("GET", `/api/ledger/customers${qs}`);
+  if (error) { ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
+  const customers = data?.customers || [];
+  if (!customers.length) {
+    ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${
+      overdue || q ? "No accounts match this filter." : "No outstanding balances. Order totals post here automatically."
+    }</p>`;
+    return;
+  }
+  ledgerList.innerHTML = "";
+  customers.forEach((c) => ledgerList.appendChild(ledgerCard(c)));
+}
+
+function ledgerCard(c) {
+  const card = document.createElement("div");
+  card.className = "inv-card" + (c.overdue ? " out" : "");
+  const overdueTag = c.overdue
+    ? `<span class="status-badge out_of_stock">Overdue ${overdueDaysLabel(c.oldestOverdueDate)}</span>`
+    : "";
+  const reminded = c.lastReminderAt
+    ? ` · reminded ${new Date(c.lastReminderAt).toLocaleDateString()}`
+    : "";
+  card.innerHTML = `
+    <div>
+      <div class="name">${escHtml(c.customerName)}</div>
+      <div class="meta">${escHtml(c.phone || "")}${reminded} ${overdueTag}</div>
+    </div>
+    <div class="qty">${fmtMoney(c.balance)}<small>owes</small></div>`;
+  card.addEventListener("click", () => openLedgerDetail(c.customerId));
+  return card;
+}
+
+function overdueDaysLabel(dateStr) {
+  if (!dateStr) return "";
+  const due = new Date(dateStr);
+  const days = Math.floor((Date.now() - due.getTime()) / 86400000);
+  return days > 0 ? `${days}d` : "";
+}
+
+async function openLedgerDetail(customerId) {
+  if (!ledgerDetailModal || !ledgerDetailBody) return;
+  currentLedgerCustomerId = customerId;
+  ledgerDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  ledgerDetailModal.classList.remove("hidden");
+
+  const { data, error } = await apiRequest("GET", `/api/ledger/customers/${customerId}`);
+  const ledger = data?.ledger;
+  if (error || !ledger) {
+    ledgerDetailBody.innerHTML = `<p class="muted">${escHtml(error || "Not found.")}</p>`;
+    return;
+  }
+  renderLedgerDetail(ledger);
+}
+
+function balanceSummaryLine(balance) {
+  if (balance > 0.005) return `<strong class="ledger-owes">${fmtMoney(balance)}</strong> outstanding`;
+  if (balance < -0.005) return `<strong class="ledger-credit">${fmtMoney(-balance)}</strong> in credit`;
+  return `<strong>Settled</strong>`;
+}
+
+function renderLedgerDetail(ledger) {
+  if (ledgerDetailTitle) ledgerDetailTitle.textContent = ledger.customerName;
+
+  const entries = ledger.entries || [];
+  const entryRows = entries.length
+    ? entries.map((e) => {
+        const signed = e.entryType === "debit" ? `+${fmtMoney(e.amount)}` : `− ${fmtMoney(e.amount)}`;
+        const label = LEDGER_SOURCE_LABELS[e.source] || e.source;
+        const due = e.dueDate ? ` · due ${new Date(e.dueDate).toLocaleDateString()}` : "";
+        const detail = e.note || e.referenceLabel || label;
+        return `
+        <tr>
+          <td>${new Date(e.createdAt).toLocaleDateString()}<div class="muted tiny">${escHtml(detail)}${due}</div></td>
+          <td class="${e.entryType === "debit" ? "neg" : "pos"}">${signed}</td>
+          <td>${fmtMoney(e.balanceAfter)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="3" class="muted tiny">No ledger activity yet.</td></tr>`;
+
+  const reminders = ledger.reminders || [];
+  const reminderRows = reminders.length
+    ? reminders.map((r) => `
+        <li>
+          <span class="status-badge sent">${REMINDER_CHANNEL_LABELS[r.channel] || r.channel}</span>
+          <span class="muted tiny">${new Date(r.createdAt).toLocaleString()} · balance ${fmtMoney(r.balanceAtReminder)}</span>
+          ${r.note ? `<div class="tiny">${escHtml(r.note)}</div>` : ""}
+        </li>`).join("")
+    : `<li class="muted tiny">No reminders logged yet.</li>`;
+
+  ledgerDetailBody.innerHTML = `
+    <div class="info">
+      <div class="info-row"><span class="label">Balance</span><span>${balanceSummaryLine(ledger.balance)}</span></div>
+      ${ledger.overdue ? `<div class="info-row"><span class="label">Status</span><span class="status-badge out_of_stock">Overdue ${overdueDaysLabel(ledger.oldestOverdueDate)}</span></div>` : ""}
+      ${ledger.phone ? `<div class="info-row"><span class="label">Phone</span>${escHtml(ledger.phone)}</div>` : ""}
+    </div>
+
+    <div class="inv-adjust">
+      <h4>Record a transaction</h4>
+      <div class="ledger-entry-row">
+        <input class="inv-delta" id="ledgerAmountInput" type="number" min="0" step="0.01" placeholder="Amount ₹" />
+        <input class="inv-reason" id="ledgerNoteInput" type="text" placeholder="Note (optional)" />
+        <input class="ledger-due" id="ledgerDueInput" type="date" title="Due date (charges)" />
+      </div>
+      <div class="ledger-entry-actions">
+        <button type="button" class="button tiny primary" id="ledgerPaymentBtn">Record payment</button>
+        <button type="button" class="button tiny ghost" id="ledgerChargeBtn">Add charge</button>
+      </div>
+    </div>
+
+    <div class="inv-adjust">
+      <h4>Log a reminder</h4>
+      <div class="ledger-entry-row">
+        <select class="crm-search" id="ledgerChannelSelect" style="flex:0 0 auto;">
+          <option value="whatsapp">WhatsApp</option>
+          <option value="call">Call</option>
+          <option value="sms">SMS</option>
+          <option value="email">Email</option>
+          <option value="manual">Other</option>
+        </select>
+        <input class="inv-reason" id="ledgerReminderNote" type="text" placeholder="Reminder note (optional)" />
+        <button type="button" class="button tiny ghost" id="ledgerReminderBtn">Log reminder</button>
+      </div>
+    </div>
+
+    <h4 class="section-label">Statement</h4>
+    <table class="inv-movements">
+      <thead><tr><th>When</th><th>Amount</th><th>Balance</th></tr></thead>
+      <tbody>${entryRows}</tbody>
+    </table>
+
+    <h4 class="section-label">Reminders</h4>
+    <ul class="ledger-reminders">${reminderRows}</ul>`;
+
+  document.getElementById("ledgerPaymentBtn")?.addEventListener("click", () => addLedgerEntry(ledger.customerId, "credit"));
+  document.getElementById("ledgerChargeBtn")?.addEventListener("click", () => addLedgerEntry(ledger.customerId, "debit"));
+  document.getElementById("ledgerReminderBtn")?.addEventListener("click", () => logLedgerReminder(ledger.customerId));
+}
+
+async function addLedgerEntry(customerId, entryType) {
+  const amount = Number(document.getElementById("ledgerAmountInput")?.value);
+  const note = (document.getElementById("ledgerNoteInput")?.value || "").trim();
+  const dueDate = document.getElementById("ledgerDueInput")?.value || null;
+  if (!amount || amount <= 0) { showTransientToast("Enter an amount greater than zero."); return; }
+
+  const body = { entryType, amount, note, source: entryType === "credit" ? "payment" : "manual" };
+  if (entryType === "debit" && dueDate) body.dueDate = dueDate;
+
+  const { error } = await apiRequest("POST", `/api/ledger/customers/${customerId}/entries`, body);
+  if (error) { showTransientToast(error); return; }
+  showTransientToast(entryType === "credit" ? "Payment recorded." : "Charge added.");
+  renderLedgerSummary();
+  openLedgerDetail(customerId);
+}
+
+async function logLedgerReminder(customerId) {
+  const channel = document.getElementById("ledgerChannelSelect")?.value || "manual";
+  const note = (document.getElementById("ledgerReminderNote")?.value || "").trim();
+  const { error } = await apiRequest("POST", `/api/ledger/customers/${customerId}/reminders`, { channel, note });
+  if (error) { showTransientToast(error); return; }
+  showTransientToast("Reminder logged.");
+  openLedgerDetail(customerId);
+}
+
+function closeLedgerDetail() {
+  if (ledgerDetailModal) ledgerDetailModal.classList.add("hidden");
+  currentLedgerCustomerId = null;
+  // Refresh the list so updated balances / reminder dates show immediately.
+  if (ledgerModal && !ledgerModal.classList.contains("hidden")) renderLedgerList();
+}
+
 /* ===================== Phase 3: Pilot Validation Analytics ===================== */
 
 function generateEventId() {
@@ -4086,6 +4330,15 @@ if (invShadePicker) {
   });
 }
 
+// Phase 6: Credit Ledger
+if (ledgerBtn) ledgerBtn.addEventListener("click", openLedgerModal);
+if (closeLedgerBtn) closeLedgerBtn.addEventListener("click", closeLedgerModal);
+if (closeLedger2Btn) closeLedger2Btn.addEventListener("click", closeLedgerModal);
+if (closeLedgerDetailBtn) closeLedgerDetailBtn.addEventListener("click", closeLedgerDetail);
+if (closeLedgerDetail2Btn) closeLedgerDetail2Btn.addEventListener("click", closeLedgerDetail);
+if (ledgerSearchInput) ledgerSearchInput.addEventListener("input", renderLedgerList);
+if (ledgerFilter) ledgerFilter.addEventListener("change", renderLedgerList);
+
 // Phase 3: leads modal tab buttons
 const leadsTabBtn = document.getElementById("leadsTabBtn");
 const analyticsTabBtn = document.getElementById("analyticsTabBtn");
@@ -4142,7 +4395,7 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
 })();
 
 // Backdrop click to close
-[contactModal, leadsModal, leadDetailModal, settingsModal, quotesModal, docDetailModal, inventoryModal, inventoryDetailModal].forEach((m) => {
+[contactModal, leadsModal, leadDetailModal, settingsModal, quotesModal, docDetailModal, inventoryModal, inventoryDetailModal, ledgerModal, ledgerDetailModal].forEach((m) => {
   if (!m) return;
   m.addEventListener("click", (e) => {
     if (e.target === m) {
@@ -4150,6 +4403,7 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
       if (m === leadDetailModal) currentDetailLeadId = null;
       if (m === docDetailModal) currentDoc = null;
       if (m === inventoryDetailModal) { currentInventoryId = null; currentInventoryObj = null; }
+      if (m === ledgerDetailModal) currentLedgerCustomerId = null;
     }
   });
 });
@@ -4157,6 +4411,14 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
 // Escape key support
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    if (ledgerDetailModal && !ledgerDetailModal.classList.contains("hidden")) {
+      closeLedgerDetail();
+      return;
+    }
+    if (ledgerModal && !ledgerModal.classList.contains("hidden")) {
+      closeLedgerModal();
+      return;
+    }
     if (inventoryDetailModal && !inventoryDetailModal.classList.contains("hidden")) {
       closeInventoryDetail();
       return;
