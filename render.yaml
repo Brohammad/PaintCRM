@@ -1,0 +1,33 @@
+# Render Blueprint — deploy PaintCRM (Express API + built Vite frontend) on the
+# free tier with no credit card. Docs: https://render.com/docs/blueprint-spec
+#
+# Usage:
+#   1. Create a free Postgres on Neon (https://neon.tech) — no card required.
+#   2. Render Dashboard → New + → Blueprint → connect this repo.
+#   3. When prompted, paste your Neon connection string as DATABASE_URL.
+#
+# The Docker image (server/Dockerfile) builds the frontend and, on start, runs
+# migrations then boots the server. Render injects PORT automatically and the
+# app binds to it (index.js uses process.env.PORT).
+services:
+  - type: web
+    name: paintcrm
+    runtime: docker
+    plan: free
+    region: singapore
+    # Once this branch is merged to main, change this to `main`.
+    branch: cursor/fix-production-hardening-issues
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Auto-generated secure secret (>=32 chars satisfies the production guard).
+      - key: JWT_SECRET
+        generateValue: true
+      # Neon requires TLS; NODE_ENV=production already enables it. If Neon's cert
+      # chain is ever rejected, add DB_SSL_REJECT_UNAUTHORIZED=false.
+      - key: DATABASE_URL
+        sync: false
