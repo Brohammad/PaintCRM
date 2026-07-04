@@ -27,6 +27,7 @@
             <button id="leadsBtn" class="button ghost" disabled>Leads <span id="leadsCount">0</span></button>
             <button id="customersBtn" class="button ghost" title="CRM — sign in required">Customers</button>
             <button id="quotesBtn" class="button ghost" title="Quotes &amp; Orders — sign in required">Quotes</button>
+            <button id="inventoryBtn" class="button ghost" title="Inventory — sign in required">Inventory</button>
             <button id="settingsBtn" class="button ghost">Settings</button>
             <button id="restoreDraftBtn" class="button ghost" style="display:none">Restore draft</button>
             <button id="clearSessionBtn" class="button ghost" style="display:none">New session</button>
@@ -592,6 +593,114 @@
         <div id="docDetailBody" class="lead-detail-body"></div>
 
         <div class="modal-actions" id="docDetailActions"></div>
+      </div>
+    </div>
+
+    <!-- Phase 6: Inventory -->
+    <div id="inventoryModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="inventoryTitle">Inventory</h3>
+          <button id="closeInventoryBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="inventorySignInPrompt" class="muted" style="padding:12px;display:none;">
+          Sign in via Settings → Server Sync to track stock and reorder levels.
+        </div>
+
+        <div id="inventoryPanel">
+          <div id="inventorySummary" class="inv-summary"></div>
+          <div class="crm-toolbar">
+            <input id="inventorySearchInput" type="search" placeholder="Search name, brand, or SKU…" class="crm-search" />
+            <select id="inventoryStatusFilter" class="crm-search" style="flex:0 0 auto;">
+              <option value="">All stock</option>
+              <option value="in_stock">In stock</option>
+              <option value="low_stock">Low stock</option>
+              <option value="out_of_stock">Out of stock</option>
+            </select>
+            <button type="button" id="newInventoryBtn" class="button tiny primary">+ New Item</button>
+          </div>
+          <div id="inventoryList" class="leads-list"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="closeInventory2Btn" class="button ghost">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="inventoryFormModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryFormTitle">
+      <div class="modal-content">
+        <header class="modal-header">
+          <h3 id="inventoryFormTitle">New Item</h3>
+          <button id="closeInventoryFormBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+        <form id="inventoryForm">
+          <div class="form-grid">
+            <label class="field full">
+              <span>Product name <span class="req">*</span></span>
+              <input id="invName" type="text" required placeholder="Royale Luxury Emulsion 10L" />
+            </label>
+            <label class="field">
+              <span>Brand</span>
+              <input id="invBrand" type="text" placeholder="Asian Paints" />
+            </label>
+            <label class="field">
+              <span>SKU</span>
+              <input id="invSku" type="text" placeholder="Optional" />
+            </label>
+            <label class="field">
+              <span>Unit</span>
+              <input id="invUnit" type="text" value="litre" />
+            </label>
+            <label class="field" id="invQtyField">
+              <span>Opening quantity</span>
+              <input id="invQuantity" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Reorder level</span>
+              <input id="invReorder" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Selling price (₹)</span>
+              <input id="invUnitPrice" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Cost price (₹)</span>
+              <input id="invCostPrice" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field full">
+              <span>Link to catalog shade (optional)</span>
+              <select id="invShadePicker"><option value="">No linked shade</option></select>
+            </label>
+            <label class="field full">
+              <span>Notes</span>
+              <textarea id="invNotes" rows="2"></textarea>
+            </label>
+          </div>
+          <p id="inventoryFormError" class="form-error"></p>
+          <div class="modal-actions">
+            <button type="button" id="cancelInventoryFormBtn" class="button ghost">Cancel</button>
+            <button type="submit" id="saveInventoryBtn" class="button primary">Save Item</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="inventoryDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryDetailTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="inventoryDetailTitle">Item</h3>
+          <button id="closeInventoryDetailBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="inventoryDetailBody" class="lead-detail-body"></div>
+
+        <div class="modal-actions">
+          <button id="deleteInventoryBtn" class="button ghost danger">Delete</button>
+          <button id="editInventoryBtn" class="button ghost">Edit</button>
+          <button id="closeInventoryDetail2Btn" class="button primary">Done</button>
+        </div>
       </div>
     </div>
 

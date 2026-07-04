@@ -164,6 +164,21 @@ Quote → order flow for signed-in dealers.
 - **Status workflows** — inline status controls on the quote/order detail view
 - Requires sign-in (commercial data is server-only; the offline decision flow is unaffected)
 
+Inventory basics + stock status:
+
+| Endpoint | What it does |
+|----------|-------------|
+| `GET/POST /api/inventory` | List (search `?q=`, filter `?status=`) and create stock items |
+| `GET/PUT/DELETE /api/inventory/:id` | Read (with movement history), update metadata, delete |
+| `POST /api/inventory/:id/adjust` | Apply a signed stock movement (`{delta, reason}`) |
+| `GET /api/inventory/summary` | Counts by stock status + total stock value |
+
+- **Inventory** button — item list with search, stock-status filter, and summary chips (items / low / out / stock value)
+- **Stock status** derived from quantity vs. reorder level: `in_stock` / `low_stock` / `out_of_stock`
+- **Auditable movements** — every quantity change (opening stock, receive, issue, correction) is recorded with a running balance; adjustments can't drive stock negative
+- **Catalog link** — optionally link an item to a shade to auto-fill name/brand/price
+- **Per-tenant SKUs** — optional, uniquely enforced only when provided
+
 ---
 
 ## User flow (demo script)
@@ -225,7 +240,7 @@ curl -s -X POST http://localhost:3001/api/auth/register \
 | 3 | Done | Pilot validation — analytics engine, dealer branding, KPI dashboard |
 | 4 | Done | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking, Docker, CI |
 | 5 | Done | CRM Lite — customer CRUD, sites/projects, session timeline (server sync) |
-| 6 | In progress | Commercial modules — quote → order flow (inventory & credit ledger next) |
+| 6 | In progress | Commercial modules — quote → order flow + inventory/stock status (credit ledger next) |
 | 7+ | Future | AI palette recommendations, dealer assistant |
 
 See [`master-plan.txt`](master-plan.txt) for the full execution plan with sprint breakdowns and success metrics.

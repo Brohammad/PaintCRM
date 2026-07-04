@@ -127,7 +127,17 @@ Phase 6 - Commercial Modules (In progress)
     line items from catalog or manual, discount/tax, live totals), detail view with status
     controls and Convert to Order. Requires sign-in.
   - Jest: quotes.test.js + orders.test.js (backend suite now 75 tests, coverage >70%)
-- Inventory basics and stock status (Next)
+- Inventory basics and stock status (Done — Jul 2026)
+  - inventory_items + inventory_movements tables (migration 008); per-tenant optional SKU
+    (partial unique index), reorder levels, selling/cost prices
+  - Derived stock status: in_stock / low_stock / out_of_stock (quantity vs reorder level)
+  - Backend: /api/inventory (list with ?q=/?status=, create, read w/ movements, update,
+    delete), POST /:id/adjust (signed movement, blocks negative stock, audit trail), and
+    GET /summary (counts by status + total stock value)
+  - Quantity only moves through /adjust so every change is recorded with a running balance
+  - Frontend: Inventory button -> item list (search + status filter + summary chips), item
+    form (catalog-linked), detail view with receive/issue adjust controls and movement log
+  - Jest: inventory.test.js (backend suite now 90 tests, coverage >70%)
 - Credit ledger v1 and reminder actions (Next)
 
 Phase 7 - AI and Differentiation

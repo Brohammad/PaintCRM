@@ -132,6 +132,39 @@ let commerceTab = "quotes";
 let editingQuoteId = null;
 let currentDoc = null;
 
+// Phase 6 inventory elements
+const inventoryBtn = document.getElementById("inventoryBtn");
+const inventoryModal = document.getElementById("inventoryModal");
+const inventorySignInPrompt = document.getElementById("inventorySignInPrompt");
+const inventoryPanel = document.getElementById("inventoryPanel");
+const inventorySummary = document.getElementById("inventorySummary");
+const inventorySearchInput = document.getElementById("inventorySearchInput");
+const inventoryStatusFilter = document.getElementById("inventoryStatusFilter");
+const newInventoryBtn = document.getElementById("newInventoryBtn");
+const inventoryList = document.getElementById("inventoryList");
+const closeInventoryBtn = document.getElementById("closeInventoryBtn");
+const closeInventory2Btn = document.getElementById("closeInventory2Btn");
+const inventoryFormModal = document.getElementById("inventoryFormModal");
+const inventoryForm = document.getElementById("inventoryForm");
+const inventoryFormTitle = document.getElementById("inventoryFormTitle");
+const closeInventoryFormBtn = document.getElementById("closeInventoryFormBtn");
+const cancelInventoryFormBtn = document.getElementById("cancelInventoryFormBtn");
+const saveInventoryBtn = document.getElementById("saveInventoryBtn");
+const invShadePicker = document.getElementById("invShadePicker");
+const invQtyField = document.getElementById("invQtyField");
+const inventoryFormError = document.getElementById("inventoryFormError");
+const inventoryDetailModal = document.getElementById("inventoryDetailModal");
+const inventoryDetailTitle = document.getElementById("inventoryDetailTitle");
+const inventoryDetailBody = document.getElementById("inventoryDetailBody");
+const deleteInventoryBtn = document.getElementById("deleteInventoryBtn");
+const editInventoryBtn = document.getElementById("editInventoryBtn");
+const closeInventoryDetailBtn = document.getElementById("closeInventoryDetailBtn");
+const closeInventoryDetail2Btn = document.getElementById("closeInventoryDetail2Btn");
+
+let editingInventoryId = null;
+let currentInventoryId = null;
+let currentInventoryObj = null;
+
 const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
 const compareCanvas = document.getElementById("compareCanvas");
@@ -3239,6 +3272,261 @@ function editQuote(doc) {
   openQuoteForm(doc);
 }
 
+/* ===================== Phase 6: Inventory ===================== */
+
+const INV_STATUS_LABELS = { in_stock: "In stock", low_stock: "Low stock", out_of_stock: "Out of stock" };
+
+function openInventoryModal() {
+  if (!inventoryModal) return;
+  const signedIn = !!getApiToken();
+  if (inventorySignInPrompt) inventorySignInPrompt.style.display = signedIn ? "none" : "block";
+  if (inventoryPanel) inventoryPanel.style.display = signedIn ? "block" : "none";
+  inventoryModal.classList.remove("hidden");
+  if (signedIn) {
+    renderInventorySummary();
+    renderInventoryList();
+  }
+}
+
+function closeInventoryModal() {
+  if (inventoryModal) inventoryModal.classList.add("hidden");
+}
+
+async function renderInventorySummary() {
+  if (!inventorySummary) return;
+  const { data, error } = await apiRequest("GET", "/api/inventory/summary");
+  if (error || !data?.summary) { inventorySummary.innerHTML = ""; return; }
+  const s = data.summary;
+  inventorySummary.innerHTML = `
+    <div class="inv-chip"><div class="n">${s.total}</div><div class="l">Items</div></div>
+    <div class="inv-chip low"><div class="n">${s.lowStock}</div><div class="l">Low</div></div>
+    <div class="inv-chip out"><div class="n">${s.outOfStock}</div><div class="l">Out</div></div>
+    <div class="inv-chip"><div class="n">${fmtMoney(s.stockValue)}</div><div class="l">Stock value</div></div>`;
+}
+
+async function renderInventoryList() {
+  if (!inventoryList) return;
+  inventoryList.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  const q = (inventorySearchInput?.value || "").trim();
+  const status = inventoryStatusFilter?.value || "";
+  const params = [];
+  if (q) params.push(`q=${encodeURIComponent(q)}`);
+  if (status) params.push(`status=${encodeURIComponent(status)}`);
+  const qs = params.length ? `?${params.join("&")}` : "";
+
+  const { data, error } = await apiRequest("GET", `/api/inventory${qs}`);
+  if (error) { inventoryList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
+  const items = data?.items || [];
+  if (!items.length) {
+    inventoryList.innerHTML = `<p class="muted" style="padding:12px;">No items${q || status ? " match this filter" : " yet. Tap + New Item"}.</p>`;
+    return;
+  }
+  inventoryList.innerHTML = "";
+  items.forEach((it) => inventoryList.appendChild(invCard(it)));
+}
+
+function invCard(it) {
+  const card = document.createElement("div");
+  card.className = "inv-card" + (it.status === "low_stock" ? " low" : it.status === "out_of_stock" ? " out" : "");
+  card.innerHTML = `
+    <div>
+      <div class="name">${escHtml(it.name)}</div>
+      <div class="meta">${it.brand ? escHtml(it.brand) + " · " : ""}${it.sku ? escHtml(it.sku) + " · " : ""}${statusBadge(it.status, INV_STATUS_LABELS)}</div>
+    </div>
+    <div class="qty">${it.quantity} <small>${escHtml(it.unit)}</small></div>`;
+  card.addEventListener("click", () => openInventoryDetail(it.id));
+  return card;
+}
+
+function populateInvShadePicker(selectedShadeId) {
+  if (!invShadePicker) return;
+  const cat = Array.isArray(SHADE_CATALOG) ? SHADE_CATALOG : [];
+  invShadePicker.innerHTML =
+    `<option value="">No linked shade</option>` +
+    cat.map((s) =>
+      `<option value="${escHtml(s.id || "")}" data-price="${s.pricePerL || 0}" data-brand="${escHtml(s.brand || "")}" data-name="${escHtml(s.name || "")}">${escHtml(s.name)}${s.brand ? " — " + escHtml(s.brand) : ""}</option>`
+    ).join("");
+  if (selectedShadeId) invShadePicker.value = selectedShadeId;
+}
+
+function openInventoryForm(item = null) {
+  if (!inventoryFormModal) return;
+  editingInventoryId = item?.id || null;
+  if (inventoryFormTitle) inventoryFormTitle.textContent = item ? "Edit Item" : "New Item";
+  if (saveInventoryBtn) saveInventoryBtn.textContent = item ? "Update Item" : "Save Item";
+  if (inventoryFormError) inventoryFormError.textContent = "";
+
+  populateInvShadePicker(item?.shadeId);
+  setVal("invName", item?.name || "");
+  setVal("invBrand", item?.brand || "");
+  setVal("invSku", item?.sku || "");
+  setVal("invUnit", item?.unit || "litre");
+  setVal("invQuantity", item?.quantity ?? 0);
+  setVal("invReorder", item?.reorderLevel ?? 0);
+  setVal("invUnitPrice", item?.unitPrice ?? 0);
+  setVal("invCostPrice", item?.costPrice ?? 0);
+  setVal("invNotes", item?.notes || "");
+
+  // Opening quantity is only editable on create; existing stock moves via adjust.
+  if (invQtyField) invQtyField.style.display = item ? "none" : "";
+
+  inventoryFormModal.classList.remove("hidden");
+}
+
+function setVal(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value;
+}
+
+function closeInventoryForm() {
+  if (inventoryFormModal) inventoryFormModal.classList.add("hidden");
+  if (inventoryForm) inventoryForm.reset();
+  editingInventoryId = null;
+}
+
+async function handleInventorySubmit(e) {
+  e.preventDefault();
+  const name = (document.getElementById("invName")?.value || "").trim();
+  if (!name) { inventoryFormError.textContent = "Product name is required."; return; }
+
+  const payload = {
+    name,
+    brand: (document.getElementById("invBrand")?.value || "").trim(),
+    sku: (document.getElementById("invSku")?.value || "").trim(),
+    unit: (document.getElementById("invUnit")?.value || "litre").trim(),
+    reorderLevel: Number(document.getElementById("invReorder")?.value) || 0,
+    unitPrice: Number(document.getElementById("invUnitPrice")?.value) || 0,
+    costPrice: Number(document.getElementById("invCostPrice")?.value) || 0,
+    shadeId: invShadePicker?.value || "",
+    notes: (document.getElementById("invNotes")?.value || "").trim(),
+  };
+  if (!editingInventoryId) {
+    payload.quantity = Number(document.getElementById("invQuantity")?.value) || 0;
+  }
+
+  if (saveInventoryBtn) saveInventoryBtn.disabled = true;
+  const { error } = editingInventoryId
+    ? await apiRequest("PUT", `/api/inventory/${editingInventoryId}`, payload)
+    : await apiRequest("POST", "/api/inventory", payload);
+  if (saveInventoryBtn) saveInventoryBtn.disabled = false;
+
+  if (error) { inventoryFormError.textContent = error; return; }
+  const wasEditing = editingInventoryId;
+  closeInventoryForm();
+  showTransientToast(wasEditing ? "Item updated." : "Item added.");
+  renderInventorySummary();
+  if (wasEditing && currentInventoryId === wasEditing) {
+    openInventoryDetail(wasEditing);
+  } else {
+    renderInventoryList();
+  }
+}
+
+async function openInventoryDetail(id) {
+  if (!inventoryDetailModal || !inventoryDetailBody) return;
+  currentInventoryId = id;
+  inventoryDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  inventoryDetailModal.classList.remove("hidden");
+
+  const { data, error } = await apiRequest("GET", `/api/inventory/${id}`);
+  const item = data?.item;
+  if (error || !item) {
+    inventoryDetailBody.innerHTML = `<p class="muted">${escHtml(error || "Not found.")}</p>`;
+    return;
+  }
+  currentInventoryObj = item;
+  renderInventoryDetail(item);
+}
+
+function renderInventoryDetail(item) {
+  if (inventoryDetailTitle) inventoryDetailTitle.textContent = item.name;
+  const movements = item.movements || [];
+  const movementRows = movements.length
+    ? movements.map((m) => `
+        <tr>
+          <td>${new Date(m.createdAt).toLocaleString()}${m.reason ? `<div class="muted tiny">${escHtml(m.reason)}</div>` : ""}</td>
+          <td class="${m.delta >= 0 ? "pos" : "neg"}">${m.delta >= 0 ? "+" : ""}${m.delta}</td>
+          <td>${m.balanceAfter}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="3" class="muted tiny">No movements yet.</td></tr>`;
+
+  inventoryDetailBody.innerHTML = `
+    <div class="info">
+      <div class="info-row"><span class="label">Status</span>${statusBadge(item.status, INV_STATUS_LABELS)}</div>
+      <div class="info-row"><span class="label">On hand</span><strong>${item.quantity} ${escHtml(item.unit)}</strong></div>
+      <div class="info-row"><span class="label">Reorder level</span>${item.reorderLevel} ${escHtml(item.unit)}</div>
+      ${item.brand ? `<div class="info-row"><span class="label">Brand</span>${escHtml(item.brand)}</div>` : ""}
+      ${item.sku ? `<div class="info-row"><span class="label">SKU</span>${escHtml(item.sku)}</div>` : ""}
+      <div class="info-row"><span class="label">Selling</span>${fmtMoney(item.unitPrice)}</div>
+      <div class="info-row"><span class="label">Cost</span>${fmtMoney(item.costPrice)}</div>
+      ${item.notes ? `<div class="info-row"><span class="label">Notes</span>${escHtml(item.notes)}</div>` : ""}
+    </div>
+    <div class="inv-adjust">
+      <h4>Adjust stock</h4>
+      <div class="inv-adjust-row">
+        <button type="button" class="button tiny ghost" id="invReceiveBtn">Receive</button>
+        <button type="button" class="button tiny ghost" id="invIssueBtn">Issue</button>
+        <input class="inv-delta" id="invDeltaInput" type="number" step="0.01" placeholder="± qty" />
+        <input class="inv-reason" id="invReasonInput" type="text" placeholder="Reason (optional)" />
+        <button type="button" class="button tiny primary" id="invApplyBtn">Apply</button>
+      </div>
+    </div>
+    <h4 class="section-label">Recent movements</h4>
+    <table class="inv-movements">
+      <thead><tr><th>When</th><th>Change</th><th>Balance</th></tr></thead>
+      <tbody>${movementRows}</tbody>
+    </table>`;
+
+  const deltaInput = document.getElementById("invDeltaInput");
+  document.getElementById("invReceiveBtn")?.addEventListener("click", () => {
+    const v = Math.abs(Number(deltaInput.value) || 0);
+    deltaInput.value = v || "";
+    deltaInput.focus();
+  });
+  document.getElementById("invIssueBtn")?.addEventListener("click", () => {
+    const v = Math.abs(Number(deltaInput.value) || 0);
+    deltaInput.value = v ? -v : "";
+    deltaInput.focus();
+  });
+  document.getElementById("invApplyBtn")?.addEventListener("click", () => applyInventoryAdjust(item.id));
+}
+
+async function applyInventoryAdjust(id) {
+  const delta = Number(document.getElementById("invDeltaInput")?.value);
+  const reason = (document.getElementById("invReasonInput")?.value || "").trim();
+  if (!delta) { showTransientToast("Enter a non-zero quantity change."); return; }
+  const { error } = await apiRequest("POST", `/api/inventory/${id}/adjust`, { delta, reason });
+  if (error) { showTransientToast(error); return; }
+  showTransientToast("Stock updated.");
+  renderInventorySummary();
+  openInventoryDetail(id);
+}
+
+function closeInventoryDetail() {
+  if (inventoryDetailModal) inventoryDetailModal.classList.add("hidden");
+  currentInventoryId = null;
+  currentInventoryObj = null;
+}
+
+function editCurrentInventory() {
+  if (currentInventoryObj) {
+    closeInventoryDetail();
+    openInventoryForm(currentInventoryObj);
+  }
+}
+
+async function deleteCurrentInventory() {
+  if (!currentInventoryId) return;
+  const name = currentInventoryObj?.name || "this item";
+  if (!confirm(`Delete ${name}? Its stock history will be removed.`)) return;
+  const { error } = await apiRequest("DELETE", `/api/inventory/${currentInventoryId}`);
+  if (error) { showTransientToast(error); return; }
+  showTransientToast("Item deleted.");
+  closeInventoryDetail();
+  renderInventorySummary();
+  renderInventoryList();
+}
+
 /* ===================== Phase 3: Pilot Validation Analytics ===================== */
 
 function generateEventId() {
@@ -3771,6 +4059,33 @@ if (quoteDiscount) quoteDiscount.addEventListener("input", recomputeQuoteTotals)
 if (quoteTaxRate) quoteTaxRate.addEventListener("input", recomputeQuoteTotals);
 if (closeDocDetailBtn) closeDocDetailBtn.addEventListener("click", closeDocDetail);
 
+// Phase 6: Inventory
+if (inventoryBtn) inventoryBtn.addEventListener("click", openInventoryModal);
+if (closeInventoryBtn) closeInventoryBtn.addEventListener("click", closeInventoryModal);
+if (closeInventory2Btn) closeInventory2Btn.addEventListener("click", closeInventoryModal);
+if (newInventoryBtn) newInventoryBtn.addEventListener("click", () => openInventoryForm());
+if (inventoryForm) inventoryForm.addEventListener("submit", handleInventorySubmit);
+if (closeInventoryFormBtn) closeInventoryFormBtn.addEventListener("click", closeInventoryForm);
+if (cancelInventoryFormBtn) cancelInventoryFormBtn.addEventListener("click", closeInventoryForm);
+if (closeInventoryDetailBtn) closeInventoryDetailBtn.addEventListener("click", closeInventoryDetail);
+if (closeInventoryDetail2Btn) closeInventoryDetail2Btn.addEventListener("click", closeInventoryDetail);
+if (editInventoryBtn) editInventoryBtn.addEventListener("click", editCurrentInventory);
+if (deleteInventoryBtn) deleteInventoryBtn.addEventListener("click", deleteCurrentInventory);
+if (inventorySearchInput) inventorySearchInput.addEventListener("input", renderInventoryList);
+if (inventoryStatusFilter) inventoryStatusFilter.addEventListener("change", renderInventoryList);
+if (invShadePicker) {
+  invShadePicker.addEventListener("change", () => {
+    const opt = invShadePicker.selectedOptions[0];
+    if (!opt || !opt.value) return;
+    const nameEl = document.getElementById("invName");
+    const brandEl = document.getElementById("invBrand");
+    const priceEl = document.getElementById("invUnitPrice");
+    if (nameEl && !nameEl.value) nameEl.value = opt.dataset.name || "";
+    if (brandEl && !brandEl.value) brandEl.value = opt.dataset.brand || "";
+    if (priceEl && (!priceEl.value || priceEl.value === "0")) priceEl.value = opt.dataset.price || "0";
+  });
+}
+
 // Phase 3: leads modal tab buttons
 const leadsTabBtn = document.getElementById("leadsTabBtn");
 const analyticsTabBtn = document.getElementById("analyticsTabBtn");
@@ -3827,13 +4142,14 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
 })();
 
 // Backdrop click to close
-[contactModal, leadsModal, leadDetailModal, settingsModal, quotesModal, docDetailModal].forEach((m) => {
+[contactModal, leadsModal, leadDetailModal, settingsModal, quotesModal, docDetailModal, inventoryModal, inventoryDetailModal].forEach((m) => {
   if (!m) return;
   m.addEventListener("click", (e) => {
     if (e.target === m) {
       m.classList.add("hidden");
       if (m === leadDetailModal) currentDetailLeadId = null;
       if (m === docDetailModal) currentDoc = null;
+      if (m === inventoryDetailModal) { currentInventoryId = null; currentInventoryObj = null; }
     }
   });
 });
@@ -3841,6 +4157,18 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
 // Escape key support
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    if (inventoryDetailModal && !inventoryDetailModal.classList.contains("hidden")) {
+      closeInventoryDetail();
+      return;
+    }
+    if (inventoryFormModal && !inventoryFormModal.classList.contains("hidden")) {
+      closeInventoryForm();
+      return;
+    }
+    if (inventoryModal && !inventoryModal.classList.contains("hidden")) {
+      closeInventoryModal();
+      return;
+    }
     if (docDetailModal && !docDetailModal.classList.contains("hidden")) {
       closeDocDetail();
       return;

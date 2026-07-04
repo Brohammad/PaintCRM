@@ -1063,6 +1063,9 @@ body {
 .status-badge.converted,
 .status-badge.fulfilled { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
 .status-badge.pending { background: #f6efd8; color: #8a6d1e; border-color: #ece0bb; }
+.status-badge.in_stock { background: #e3f2e6; color: #2f7d43; border-color: #cbe6d1; }
+.status-badge.low_stock { background: #f6efd8; color: #8a6d1e; border-color: #ece0bb; }
+.status-badge.out_of_stock { background: #f7e2df; color: #a5372a; border-color: #eecbc5; }
 
 .section-label {
   margin: 18px 0 6px;
@@ -1183,3 +1186,85 @@ body {
   font-size: 0.85rem;
   margin-right: auto;
 }
+
+/* ===================== Phase 6: Inventory ===================== */
+
+.inv-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.inv-summary .inv-chip {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  text-align: center;
+}
+.inv-summary .inv-chip .n { font-weight: 700; font-size: 1.15rem; }
+.inv-summary .inv-chip .l {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+.inv-summary .inv-chip.low .n { color: #8a6d1e; }
+.inv-summary .inv-chip.out .n { color: #a5372a; }
+
+.inv-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.inv-card:hover { border-color: var(--accent); }
+.inv-card.low { border-left: 3px solid #d9a521; }
+.inv-card.out { border-left: 3px solid var(--accent); }
+.inv-card .name { font-weight: 600; }
+.inv-card .meta { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+.inv-card .qty { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.inv-card .qty small { display: block; font-weight: 400; }
+
+.inv-adjust {
+  margin: 14px 0 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.inv-adjust h4 { margin: 0 0 8px; font-size: 0.85rem; }
+.inv-adjust-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.inv-adjust-row input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+.inv-adjust-row .inv-delta { width: 110px; text-align: right; }
+.inv-adjust-row .inv-reason { flex: 1; min-width: 140px; }
+
+.inv-movements {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+.inv-movements th,
+.inv-movements td {
+  text-align: left;
+  padding: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.inv-movements td:nth-child(2),
+.inv-movements td:nth-child(3),
+.inv-movements th:nth-child(2),
+.inv-movements th:nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
+.inv-movements .pos { color: #2f7d43; }
+.inv-movements .neg { color: #a5372a; }

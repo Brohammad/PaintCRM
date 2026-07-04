@@ -671,7 +671,44 @@ CREATE INDEX idx_orders_tenant_customer ON orders(tenant_id, customer_id);
 CREATE INDEX idx_orders_tenant_status ON orders(tenant_id, status);
 CREATE INDEX idx_orders_quote ON orders(quote_id);
 -- order_items: identical columns to quote_items with order_id FK + idx_order_items_order
+
+-- Phase 6 (Inventory): stock items + append-only movement log (migration 008)
+CREATE TABLE inventory_items (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  sku           VARCHAR(64) NOT NULL DEFAULT '',   -- optional; unique per tenant when set
+  name          VARCHAR(255) NOT NULL,
+  brand         VARCHAR(120) DEFAULT '',
+  shade_id      VARCHAR(64) DEFAULT '',            -- soft link to shades.id
+  unit          VARCHAR(32) NOT NULL DEFAULT 'litre',
+  quantity      NUMERIC(12,2) NOT NULL DEFAULT 0,  -- on hand; only moves via /adjust
+  reorder_level NUMERIC(12,2) NOT NULL DEFAULT 0,
+  unit_price    NUMERIC(12,2) NOT NULL DEFAULT 0,  -- selling price
+  cost_price    NUMERIC(12,2) NOT NULL DEFAULT 0,
+  notes         TEXT DEFAULT '',
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_inventory_tenant ON inventory_items(tenant_id);
+CREATE INDEX idx_inventory_tenant_name ON inventory_items(tenant_id, name);
+CREATE UNIQUE INDEX inventory_items_tenant_sku_unique
+  ON inventory_items(tenant_id, sku) WHERE sku <> '';  -- partial: blanks allowed
+
+CREATE TABLE inventory_movements (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  item_id       UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  delta         NUMERIC(12,2) NOT NULL,   -- + received / - issued
+  reason        VARCHAR(255) DEFAULT '',
+  balance_after NUMERIC(12,2) NOT NULL,   -- running balance snapshot
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_inv_moves_item ON inventory_movements(item_id);
+CREATE INDEX idx_inv_moves_tenant_ts ON inventory_movements(tenant_id, created_at);
 ```
+
+**Stock status** is derived (never stored): `out_of_stock` when `quantity <= 0`,
+`low_stock` when `reorder_level > 0 AND quantity <= reorder_level`, else `in_stock`.
 
 ### 4.4 API Route Reference
 
@@ -761,6 +798,23 @@ are generated per-tenant as `prefix + max(numeric suffix so far)+1`, zero-padded
 digits (resilient to deletions), and guarded by a `UNIQUE (tenant_id, number)` constraint.
 Converting a quote snapshots its items + totals into a new order and sets the quote to
 `converted` (thereafter read-only).
+
+#### Inventory (`/api/inventory`) — Phase 6
+
+| Method | Path | Auth | Body / Params | Response |
+|--------|------|------|--------------|----------|
+| GET | `/` | ✓ | `?q=<search>&status=<in_stock\|low_stock\|out_of_stock>` | `{items[]}` |
+| GET | `/summary` | ✓ | — | `{summary:{total,inStock,lowStock,outOfStock,stockValue}}` |
+| POST | `/` | ✓ | `{name, sku?, brand?, shadeId?, unit?, quantity?, reorderLevel?, unitPrice?, costPrice?, notes?}` | `{item}` — 201; 409 on duplicate SKU |
+| GET | `/:id` | ✓ | — | `{item}` (with `movements[]`) |
+| PUT | `/:id` | ✓ | metadata (quantity ignored — use `/adjust`) | `{item}` |
+| POST | `/:id/adjust` | ✓ | `{delta, reason?}` | `{item}`; 400 if it would go negative |
+| DELETE | `/:id` | ✓ | — | `{ok: true}` |
+
+On-hand quantity changes **only** through `POST /:id/adjust`, which runs in a transaction
+(`SELECT … FOR UPDATE`), rejects a resulting negative balance, and writes an
+`inventory_movements` row with the running `balance_after`. Item creation records an
+"Opening stock" movement when the opening quantity is non-zero.
 
 ### 4.5 Funnel Analytics Query Design
 
@@ -1382,7 +1436,7 @@ export default function () {
 | 3 | Done | Analytics event system, local dashboard, dealer branding |
 | 4 | **Done** | PostgreSQL backend with connection pooling, JWT auth, Docker containerization, CI/CD, monitoring stack |
 | 5 | **Done** | Customer CRM (CRUD), site/project model, preview session linked to customer timeline |
-| 6 | **In progress** | Quote → order flow (done): quotes/orders schema, server-computed totals, per-tenant document numbers, transactional conversion. Inventory stock status + credit ledger next |
+| 6 | **In progress** | Quote → order flow + inventory/stock status (done): commerce + inventory schema, server-computed totals, transactional conversion, auditable stock movements. Credit ledger next |
 | 7 | Planned | AI palette recommendations (style/mood/season), dealer assistant prompts (LLM) |
 | 8 | Future | Contractor assignment, customer-facing app, marketplace mechanics |
 
@@ -1398,4 +1452,4 @@ export default function () {
 
 ---
 
-*Last updated: Jul 3, 2026 — Phase 6 quote → order flow complete (inventory + credit ledger next)*
+*Last updated: Jul 4, 2026 — Phase 6 quote → order flow + inventory/stock status complete (credit ledger next)*

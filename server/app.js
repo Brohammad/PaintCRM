@@ -136,6 +136,7 @@ app.use('/api/sites', require('./routes/sites'));
 app.use('/api/sessions', require('./routes/sessions'));
 app.use('/api/quotes', require('./routes/quotes'));
 app.use('/api/orders', require('./routes/orders'));
+app.use('/api/inventory', require('./routes/inventory'));
 
 // Health probes
 app.get('/api/health', async (req, res) => {
