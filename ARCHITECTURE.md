@@ -99,8 +99,13 @@ PaintCRM/
 ├── paint-preview-app/          # Frontend (Vite build; ES modules)
 │   ├── index.html              # SPA shell + all modals; module entry = ./script.js
 │   ├── script.js               # UI/DOM logic (module entry), imports src/*
-│   ├── src/                    # Extracted, unit-tested ES modules
+│   ├── src/                    # Extracted, unit-tested ES modules (80 Vitest tests)
 │   │   ├── api.js              # token storage + apiRequest w/ refresh-on-401
+│   │   ├── color.js            # hex/RGB/HSL, pixel reads
+│   │   ├── segmentation.js     # wall detection, mask pipeline, ML fuse
+│   │   ├── tint.js             # alpha masks, recolor blend, suggestions
+│   │   ├── cost.js             # paint litres + INR estimate
+│   │   ├── format.js / ids.js  # CRM HTML helpers, offline id gen
 │   │   ├── utils.js            # escHtml / money / rounding helpers
 │   │   ├── pagination.js       # withPageParams + createPaginator
 │   │   └── *.test.js           # Vitest + jsdom unit tests
@@ -167,28 +172,27 @@ PaintCRM/
 
 ## 3. Frontend Architecture
 
-The frontend is deliberately a **zero-dependency, zero-build-step** single HTML page. No React, no Webpack, no TypeScript. The reasoning: a dealer should be able to open `index.html` directly from a USB stick if needed, and any developer should be able to read and modify the code without toolchain setup.
+The frontend is **vanilla JS** (no React in the main app) bundled with **Vite** for production. Pure algorithms and API helpers live in `src/` as unit-tested ES modules; `script.js` (~3,800 lines) is the module entry point — DOM refs, feature modals, event wiring, and canvas orchestration.
 
-All logic lives in `script.js` (~2750 lines), organized into named sections:
+| Layer | Location | Responsibility |
+|-------|----------|----------------|
+| **Engine modules** | `src/color.js`, `segmentation.js`, `tint.js`, `cost.js` | Colour math, wall masking, recolor, cost estimate — 80 Vitest tests |
+| **Platform modules** | `src/api.js`, `pagination.js`, `utils.js`, `format.js`, `ids.js` | Auth/sync, paging, formatting |
+| **UI shell** | `index.html` | Modals, layout, accessibility |
+| **App wiring** | `script.js` | State, canvas pipeline glue, CRM/commerce/ledger views |
+
+Legacy section map (pre-extraction; algorithms now in `src/`):
 
 | Section | Lines (approx.) | Responsibility |
 |---------|----------------|----------------|
 | Globals & state | 1–140 | DOM refs, `state` object, storage keys |
 | Shade catalog | 141–176 | Fetch, fallback, cost estimate |
-| Color math | 177–251 | `hexToRgb`, `rgbToHsl`, `hslToRgb`, `clamp` |
-| ML subsystem | 252–437 | DeepLab load, segment, fuse, label mapping |
-| Wall detection | 438–855 | Candidate map, flood fill, component scoring |
-| Shade / zone UI | 856–1170 | Suggestions, zone tabs, swatch rendering |
-| Recolor engine | 1171–1278 | `applyTint`, `renderTinted`, `drawPreview` |
-| Canvas interaction | 1279–1520 | Compare slider, brush, pick-wall, add/remove zones |
-| Image upload | 1521–1591 | File read → ImageData → pipeline init |
-| Export | 1565–1591 | PNG + Web Share API |
-| Phase 2 — Leads | 1592–1908 | localStorage CRUD, modals, export package |
-| Phase 2 — Draft | 1909–2045 | Save/restore draft, clear session |
-| Phase 4 — API sync | 2046–2260 | apiRequest, sync functions, auth helpers |
-| Phase 3 — Analytics | 2261–2430 | Event tracking, local dashboard, export |
-| Phase 3 — Settings | 2431–2490 | Dealer settings, branding |
-| Event listeners | 2491–2749 | DOM wiring, startup calls |
+| Canvas + ML | 177–1100 | DeepLab, wall tabs, brush, render pipeline (imports `src/`) |
+| Phase 2 — Leads | 1100–1620 | localStorage CRUD, modals, export package |
+| Phase 4 — API sync | 1620–1890 | sync functions, auth helpers (uses `src/api.js`) |
+| Phase 5–6 — CRM/commerce | 1890–3150 | customers, quotes, orders, inventory, ledger |
+| Phase 3 — Analytics | 3150–3480 | Event tracking, local dashboard |
+| Event listeners | 3630+ | DOM wiring, startup calls |
 
 ### 3.1 State Model
 

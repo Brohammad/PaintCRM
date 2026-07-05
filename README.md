@@ -2,14 +2,116 @@
 
 A paint decision engine that helps customers choose a wall color confidently in under 60 seconds. Built for in-store dealer demos — upload a room photo, preview shades live on the walls, compare side by side, capture a lead, and sync everything to a real backend.
 
+**Live demo:** [paintcrm.brohammad.tech](https://paintcrm.brohammad.tech) · **Login:** [/login](https://paintcrm.brohammad.tech/login)
+
+| | |
+|---|---|
+| **Architecture** | [`ARCHITECTURE.md`](ARCHITECTURE.md) — full system reference |
+| **Operations** | [`OPERATIONS.md`](OPERATIONS.md) — deploy, monitoring, runbooks |
+| **Roadmap** | [`master-plan.txt`](master-plan.txt) — phase plan + metrics |
+
+---
+
+## Architecture at a glance
+
+```mermaid
+flowchart TB
+  subgraph Browser["Browser (offline-first)"]
+    APP["Vite bundle · script.js + views"]
+    MOD["src/ modules"]
+    APP --> MOD
+    MOD --> COLOR["color · segmentation · tint"]
+    MOD --> CRM["api · pagination · cost · format"]
+  end
+
+  subgraph Server["Express API :3001"]
+    MW["Helmet · CORS · rate limit · JWT auth"]
+    RT["12 route modules"]
+    LB["8 domain libs"]
+    MW --> RT --> LB
+  end
+
+  subgraph Store["Persistence & ops"]
+    PG[(PostgreSQL<br/>multi-tenant)]
+    RD[(Redis<br/>rate limit fallback)]
+    PR["Prometheus · Pino logs"]
+  end
+
+  APP -->|"REST · access + refresh tokens"| MW
+  LB --> PG
+  MW -.-> RD
+  Server --> PR
+```
+
+**Auth lifecycle (summary):** register/login → short-lived access token (~15m) + rotating refresh token (SHA-256 hash stored server-side) → transparent refresh on `401` → reuse detection revokes the session chain on token replay.
+
+**Data integrity highlights:** server-computed quote/order totals · append-only credit ledger with row-level locking · auditable inventory movements · per-tenant document numbering.
+
+---
+
+## Tech stack
+
+| Layer | Technologies |
+|-------|----------------|
+| **Frontend** | Vanilla JS, Vite, Vitest, Canvas 2D, optional DeepLab wall assist |
+| **Backend** | Node.js, Express, `node-pg-migrate` |
+| **Database** | PostgreSQL with tenant-scoped queries |
+| **Auth** | JWT access + rotating refresh, bcrypt (12 rounds), session revocation |
+| **Observability** | Prometheus metrics, Pino structured logs, health/ready/live probes |
+| **Infra** | Docker multi-stage, GitHub Actions CI/CD, Fly.io + Render deploy |
+
+---
+
+## Test coverage
+
+| Suite | Files | Tests | Runner |
+|-------|-------|-------|--------|
+| Backend API | 15 | 123 | Jest + Supertest |
+| Frontend units | 9 | 80 | Vitest + jsdom |
+| **Total** | **24** | **203** | CI on every push |
+
+Key frontend modules under test: wall segmentation heuristics, HSL tint pipeline, paint cost estimator, API token refresh, pagination contract.
+
+---
+
+## Demo in 60 seconds
+
+Use this flow for interviews, Loom recordings, or a live dealer walkthrough.
+
+1. **Open** [paintcrm.brohammad.tech](https://paintcrm.brohammad.tech) (or local `http://localhost:3001`)
+2. **Sign in** via Settings → Server Sync (or [/login](https://paintcrm.brohammad.tech/login))
+3. **Upload** a room photo → smart wall mask + shade suggestions appear
+4. **Pick a shade** → live recolor with before/after + compare slider
+5. **Contact Dealer** → capture lead (syncs to backend when signed in)
+6. **Quotes** → build a quote from the shade catalog with server-computed totals
+7. **Ledger** → show customer balance + log a payment reminder
+
+> **Loom tip:** Record at 1080p, ~2–3 min. Narrate *why* (dealer demo → lead → quote → receivables), not just *what* you click. End on the live URL so viewers can try it.
+
+### Full walkthrough script (2–3 min)
+
+| Step | Action | What to say |
+|------|--------|-------------|
+| 0 | Show hero + dealer branding | "Offline-first — works in a shop with bad Wi‑Fi; syncs when online." |
+| 1 | Upload photo | "Under 60 seconds from photo to painted preview — heuristic mask + optional ML assist." |
+| 2 | Tap wall / brush / multi-zone tabs | "Dealers can fix edge cases without leaving the demo." |
+| 3 | Shade search + cost estimate | "Real Asian Paints / Dulux catalog — litres and ₹ estimate for a standard room." |
+| 4 | Contact Dealer → Leads inbox | "Lead captured locally and on the server with snapshot + shade breakdown." |
+| 5 | Customers → timeline | "CRM lite — customer auto-linked by phone, sites/projects, session history." |
+| 6 | Quote → Convert to order | "Totals computed server-side — client can't tamper with line items." |
+| 7 | Ledger → reminder | "Append-only credit ledger; order totals post automatically as debits." |
+
+---
+
 ## What's in this repo
 
 | Path | Description |
 |------|-------------|
-| `paint-preview-app/` | Main app — static HTML/CSS/JS, runs in any browser with no build step |
-| `server/` | Phase 4 backend — Node.js + Express + PostgreSQL, serves the frontend on one port |
+| `paint-preview-app/` | Main app — Vite-bundled HTML/CSS/JS; `src/` holds tested ES modules (color, segmentation, tint, api, …) |
+| `server/` | Backend — Node.js + Express + PostgreSQL; 12 route modules, 8 domain libs, 10 migrations |
 | `paint-preview-app/react-canvas-component/` | Reusable React/Next.js component extracting the same canvas logic |
 | `test-scripts/` | Playwright E2E tests and backend smoke test scaffolding |
+| `ARCHITECTURE.md` | Authoritative technical reference (algorithms, schema, data flows) |
 | `master-plan.txt` | Phase roadmap from Decision Engine through CRM platform |
 
 ---
@@ -43,10 +145,12 @@ The Express server serves the frontend **and** the API on a single port. Open [h
 
 ```bash
 cd paint-preview-app
-python3 -m http.server 8080
+npm install
+npm run dev        # Vite dev server → http://localhost:5173
+# or: npm run build && npx vite preview
 ```
 
-Open [http://localhost:8080](http://localhost:8080). Everything works offline via `localStorage` — no account needed.
+Open the dev URL. Everything works offline via `localStorage` — no account needed. For a zero-install static serve of the built bundle: `npm run build` then serve `dist/`.
 
 ---
 
@@ -205,25 +309,31 @@ Cross-cutting improvements that make the platform production-ready at scale:
 
 - **Paginated list APIs** — every list endpoint (`customers`, `leads`, `quotes`, `orders`, `inventory`, `ledger/customers`) accepts `?limit=` & `?offset=` and returns a `pagination` block `{ total, limit, offset, hasMore }`. Defaults to 50/page, capped at 200. The debtor worklist has a **"Load more"** pager wired to it.
 - **Hardened auth lifecycle** — short-lived access tokens (`~15m`) backed by long-lived, **rotating** refresh tokens persisted server-side (only the SHA-256 hash is stored). Refresh rotation includes **reuse detection** (replaying a rotated token revokes the whole session chain), plus `logout` (single session) and `logout-all` (every session). The frontend refreshes access tokens **transparently on `401`**. Password policy: min 8 chars with at least one letter and one number.
-- **Modular, bundled frontend** — the app is built with **Vite** (minified + hashed assets, source maps). Reusable logic is split into ES modules (`src/api.js`, `src/utils.js`, `src/pagination.js`) with **Vitest + jsdom** unit tests. The server serves the built `dist/` when present (falls back to raw source for zero-build local dev).
+- **Modular, bundled frontend** — built with **Vite** (minified + hashed assets, source maps). Pure logic lives in tested ES modules under `paint-preview-app/src/`:
+
+  | Module | Responsibility |
+  |--------|----------------|
+  | `color.js` | Hex/RGB/HSL conversion, pixel colour reads |
+  | `segmentation.js` | Wall detection, mask grow/fuse/smooth, ML mask extraction |
+  | `tint.js` | Alpha masks, feathering, HSL recolor blend, shade suggestions |
+  | `cost.js` | Paint litres + INR estimate for a standard room |
+  | `api.js` | Token storage, `apiRequest`, transparent refresh on `401` |
+  | `pagination.js` | Client-side paging matching the backend contract |
+  | `format.js` / `ids.js` | CRM HTML helpers, offline id generation |
+
+  **80 Vitest tests** cover the engine modules; `script.js` (~3,800 lines) remains the DOM/event wiring layer (view split planned). The server serves built `dist/` in production (falls back to raw source for zero-build local dev).
 
 ---
 
-## User flow (demo script)
+## Local development checklist
 
-1. Start the server: `cd server && npm start`
+See **[Demo in 60 seconds](#demo-in-60-seconds)** for the interview/Loom flow. For local setup:
+
+1. Start the server: `cd server && npm run start:with-migrate`
 2. Open [http://localhost:3001](http://localhost:3001)
-3. **Settings → Server Sync → Create Account** — enter your shop name, email, password.
-4. **Settings → Dealer Profile** — set your dealer name and phone number → Save.
-5. Upload a room photo. The session timer starts and a `session_start` event fires (locally + server).
-6. The app suggests 5 matching shades — click one to apply it. Each pick fires `shade_selected` with time-to-first-pick.
-7. Adjust: add wall tabs, use brush or tap-to-select, toggle before/after, drag the compare slider.
-8. Click **Contact Dealer** — fill in customer name and phone → Save Lead.
-   - Lead saved locally and synced to `POST /api/leads`.
-9. **Leads → Export Package** — downloads snapshot PNG + `.json` (with dealer info).
-10. **Leads → Pilot Analytics** — review KPI cards and bar chart.
-11. **Customers** — view customer timeline (auto-created from leads when signed in).
-12. After the pilot: **Settings → Download Analytics JSON** for the full event log.
+3. **Settings → Server Sync → Create Account**
+4. **Settings → Dealer Profile** — shop name, dealer name, phone
+5. Upload photo → shades → Contact Dealer → Customers → Quote → Ledger
 
 ---
 
@@ -261,9 +371,15 @@ npm run build     # produce the minified bundle in dist/
 
 ---
 
-## Deployment (Fly.io)
+## Deployment
 
-The app ships a multi-stage `server/Dockerfile` that builds the Vite frontend and bundles it with the API, plus a repo-root `fly.toml`.
+Production runs on **Render** (free tier) with custom domain **paintcrm.brohammad.tech**. Fly.io config is also included.
+
+### Render (current production)
+
+Connect the repo via [`render.yaml`](render.yaml) — Docker build, Neon Postgres, auto-deploy on push.
+
+### Fly.io (alternative)
 
 ```bash
 # One-time
@@ -295,8 +411,8 @@ CI/CD (`.github/workflows/ci.yml`) runs backend lint/tests, frontend tests + bui
 | 3 | Done | Pilot validation — analytics engine, dealer branding, KPI dashboard |
 | 4 | Done | Backend foundation — auth, lead/shade/dealer APIs, funnel event tracking, Docker, CI |
 | 5 | Done | CRM Lite — customer CRUD, sites/projects, session timeline (server sync) |
-| 6 | In progress | Commercial modules — quote → order flow, inventory/stock status, credit ledger + payment reminders |
-| — | Done | Scale hardening — paginated APIs, refresh-token auth lifecycle, Vite-bundled modular frontend + tests, Fly.io deploy |
-| 7+ | Future | AI palette recommendations, dealer assistant |
+| 6 | Done | Commercial modules — quote → order, inventory/stock, credit ledger + payment reminders (log-only; outbound send planned) |
+| — | Done | Scale hardening — paginated APIs, refresh-token auth, Vite frontend modules + 80 unit tests, Docker CI/CD |
+| 7 | Next | AI palette recommendations, dealer assistant, WhatsApp reminder delivery |
 
 See [`master-plan.txt`](master-plan.txt) for the full execution plan with sprint breakdowns and success metrics.
