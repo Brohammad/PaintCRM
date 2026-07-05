@@ -8,6 +8,38 @@ import {
   setUnauthorizedHandler,
 } from "./src/api.js";
 import { createPaginator, withPageParams } from "./src/pagination.js";
+import {
+  clamp,
+  hexToRgb,
+  rgbToHsl,
+  hslToRgb,
+  rgbDistanceSquared,
+  getPixelColor,
+} from "./src/color.js";
+import {
+  isWallLikeLabel,
+  smoothMask,
+  dilateMask,
+  extractMaskFromSegmentation,
+  fuseMasksWithMl,
+  isLikelyWallPixel,
+  createCandidatesMap,
+  findNearestCandidate,
+  growRegionWithColorConstraint,
+  growRegion,
+  createAutoMask,
+  createSeedMask,
+  averageColorSample,
+} from "./src/segmentation.js";
+import {
+  toAlphaMask,
+  createFeatheredAlphaMask,
+  applyTint,
+  buildSuggestions,
+} from "./src/tint.js";
+import { estimatePaint } from "./src/cost.js";
+import { statusBadge, overdueDaysLabel, balanceSummaryLine } from "./src/format.js";
+import { generateLeadId, generateEventId } from "./src/ids.js";
 
 const imageInput = document.getElementById("imageInput");
 const exportBtn = document.getElementById("exportBtn");
@@ -309,13 +341,14 @@ function getCurrentCostEstimate() {
   const zone = getActiveZone();
   if (!zone) return null;
   const entry = catalogEntry({ hex: zone.shadeHex });
-  if (!entry?.pricePerL) return null;
-  const litres = Math.ceil((ROOM_SQ_M * 2) / COVERAGE_SQ_M_PER_L);
-  return {
-    litres,
-    pricePerL: entry.pricePerL,
-    totalInr: litres * entry.pricePerL,
+  const est = estimatePaint({
+    pricePerL: entry?.pricePerL,
     roomSqM: ROOM_SQ_M,
+    coveragePerL: COVERAGE_SQ_M_PER_L,
+  });
+  if (!est) return null;
+  return {
+    ...est,
     shadeName: entry.name,
     brand: entry.brand || "",
   };
@@ -334,99 +367,18 @@ function catalogEntry(shade) {
 function updateCostEstimate(shade) {
   if (!shade || !costEstimateEl) return;
   const entry = catalogEntry(shade);
-  if (!entry.pricePerL) {
+  const est = estimatePaint({
+    pricePerL: entry.pricePerL,
+    roomSqM: ROOM_SQ_M,
+    coveragePerL: COVERAGE_SQ_M_PER_L,
+  });
+  if (!est) {
     costEstimateEl.classList.add("hidden");
     return;
   }
-  const litres = Math.ceil((ROOM_SQ_M * 2) / COVERAGE_SQ_M_PER_L); // 2 coats
-  const total = litres * entry.pricePerL;
-  costLitresEl.textContent = `~${litres}L for a standard room (2 coats)`;
-  costTotalEl.textContent = `Est. ₹${total.toLocaleString("en-IN")} @ ₹${entry.pricePerL}/L`;
+  costLitresEl.textContent = `~${est.litres}L for a standard room (${est.coats} coats)`;
+  costTotalEl.textContent = `Est. ₹${est.totalInr.toLocaleString("en-IN")} @ ₹${est.pricePerL}/L`;
   costEstimateEl.classList.remove("hidden");
-}
-
-function generateLeadId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-function clamp(v, min, max) {
-  return Math.min(max, Math.max(min, v));
-}
-
-function hexToRgb(hex) {
-  const clean = hex.replace("#", "");
-  const normalized = clean.length === 3
-    ? clean.split("").map((c) => c + c).join("")
-    : clean;
-  const value = Number.parseInt(normalized, 16);
-  return {
-    r: (value >> 16) & 255,
-    g: (value >> 8) & 255,
-    b: value & 255
-  };
-}
-
-function rgbToHsl(r, g, b) {
-  const rn = r / 255;
-  const gn = g / 255;
-  const bn = b / 255;
-  const max = Math.max(rn, gn, bn);
-  const min = Math.min(rn, gn, bn);
-  const delta = max - min;
-  let h = 0;
-  const l = (max + min) / 2;
-  let s = 0;
-
-  if (delta !== 0) {
-    s = delta / (1 - Math.abs(2 * l - 1));
-    if (max === rn) h = ((gn - bn) / delta) % 6;
-    else if (max === gn) h = (bn - rn) / delta + 2;
-    else h = (rn - gn) / delta + 4;
-    h = (h * 60 + 360) % 360;
-  }
-
-  return { h, s, l };
-}
-
-function hslToRgb(h, s, l) {
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const hp = h / 60;
-  const x = c * (1 - Math.abs((hp % 2) - 1));
-  let r1 = 0;
-  let g1 = 0;
-  let b1 = 0;
-
-  if (hp < 1) {
-    r1 = c;
-    g1 = x;
-  } else if (hp < 2) {
-    r1 = x;
-    g1 = c;
-  } else if (hp < 3) {
-    g1 = c;
-    b1 = x;
-  } else if (hp < 4) {
-    g1 = x;
-    b1 = c;
-  } else if (hp < 5) {
-    r1 = x;
-    b1 = c;
-  } else {
-    r1 = c;
-    b1 = x;
-  }
-
-  const m = l - c / 2;
-  return {
-    r: Math.round((r1 + m) * 255),
-    g: Math.round((g1 + m) * 255),
-    b: Math.round((b1 + m) * 255)
-  };
 }
 
 function drawImageFit(ctx, image, canvas) {
@@ -489,95 +441,6 @@ async function ensureMlModel() {
   }
 }
 
-function isWallLikeLabel(label) {
-  return /wall|building|house|skyscraper|ceiling/i.test(label);
-}
-
-function extractMaskFromSegmentation(segmentation, targetWidth, targetHeight) {
-  if (!segmentation || !segmentation.width || !segmentation.height || !segmentation.segmentationMap) {
-    return null;
-  }
-
-  const srcWidth = segmentation.width;
-  const srcHeight = segmentation.height;
-  const srcMap = segmentation.segmentationMap;
-  const legend = segmentation.legend || {};
-
-  const wallColors = new Set();
-  Object.entries(legend).forEach(([label, color]) => {
-    if (!Array.isArray(color) || color.length < 3) return;
-    if (!isWallLikeLabel(label)) return;
-    wallColors.add(`${color[0]}:${color[1]}:${color[2]}`);
-  });
-
-  if (!wallColors.size || srcMap.length < srcWidth * srcHeight * 3) return null;
-
-  const srcMask = new Uint8Array(srcWidth * srcHeight);
-  for (let p = 0, i = 0; p < srcMask.length; p += 1, i += 4) {
-    const key = `${srcMap[i]}:${srcMap[i + 1]}:${srcMap[i + 2]}`;
-    if (wallColors.has(key)) srcMask[p] = 1;
-  }
-
-  const out = new Uint8Array(targetWidth * targetHeight);
-  for (let y = 0; y < targetHeight; y += 1) {
-    const sy = Math.min(srcHeight - 1, Math.floor((y / targetHeight) * srcHeight));
-    for (let x = 0; x < targetWidth; x += 1) {
-      const sx = Math.min(srcWidth - 1, Math.floor((x / targetWidth) * srcWidth));
-      out[y * targetWidth + x] = srcMask[sy * srcWidth + sx];
-    }
-  }
-
-  return smoothMask(out, targetWidth, targetHeight);
-}
-
-function dilateMask(mask, width, height, radius) {
-  if (radius <= 0) return new Uint8Array(mask);
-  const out = new Uint8Array(mask.length);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      if (!mask[idx]) continue;
-      for (let ny = y - radius; ny <= y + radius; ny += 1) {
-        if (ny < 0 || ny >= height) continue;
-        for (let nx = x - radius; nx <= x + radius; nx += 1) {
-          if (nx < 0 || nx >= width) continue;
-          out[ny * width + nx] = 1;
-        }
-      }
-    }
-  }
-
-  return out;
-}
-
-function fuseMasksWithMl(heuristicMask, mlMask, width, height) {
-  if (!mlMask) return heuristicMask;
-  const mlDilated = dilateMask(mlMask, width, height, 2);
-  const fused = new Uint8Array(heuristicMask.length);
-  let heuristicCount = 0;
-  let fusedCount = 0;
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      const h = heuristicMask[idx];
-      const m = mlMask[idx];
-      if (h) heuristicCount += 1;
-
-      const keep = m || (h && (mlDilated[idx] || y < height * 0.52));
-      if (keep) {
-        fused[idx] = 1;
-        fusedCount += 1;
-      }
-    }
-  }
-
-  if (!heuristicCount) return fused;
-  if (fusedCount < heuristicCount * 0.25) return heuristicMask;
-  return smoothMask(fused, width, height);
-}
-
 async function runMlSegmentationForCurrentImage() {
   if (!state.originalImage || !state.imageRect) return;
   if (!mlAssistToggle.checked) return;
@@ -614,460 +477,6 @@ async function runMlSegmentationForCurrentImage() {
     state.mlMask = null;
     setMlStatus("ML: segmentation failed (fallback active)", "error");
   }
-}
-
-function isLikelyWallPixel(r, g, b, sensitivity) {
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const sat = max === 0 ? 0 : (max - min) / max;
-  const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
-  return sat < clamp(sensitivity / 100, 0.1, 0.62) && brightness > 40 && brightness < 240;
-}
-
-function createCandidatesMap(pixels, sensitivity) {
-  const { width, height, data } = pixels;
-  const candidates = new Uint8Array(width * height);
-  const refined = new Uint8Array(width * height);
-  const luminance = new Uint8Array(width * height);
-  const texture = new Uint8Array(width * height);
-  let textureSum = 0;
-
-  for (let p = 0, i = 0; p < luminance.length; p += 1, i += 4) {
-    luminance[p] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-  }
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      const l = luminance[idx];
-      let delta = 0;
-      let count = 0;
-
-      if (x > 0) {
-        delta += Math.abs(l - luminance[idx - 1]);
-        count += 1;
-      }
-      if (x < width - 1) {
-        delta += Math.abs(l - luminance[idx + 1]);
-        count += 1;
-      }
-      if (y > 0) {
-        delta += Math.abs(l - luminance[idx - width]);
-        count += 1;
-      }
-      if (y < height - 1) {
-        delta += Math.abs(l - luminance[idx + width]);
-        count += 1;
-      }
-
-      texture[idx] = count > 0 ? Math.round(delta / count) : 0;
-      textureSum += texture[idx];
-    }
-  }
-
-  const textureMean = textureSum / texture.length;
-  const maxTexture = clamp(textureMean * 1.75 + sensitivity * 0.45, 16, 62);
-  const lowerBandTextureCutoff = clamp(textureMean * 1.25 + sensitivity * 0.3, 14, 44);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const p = y * width + x;
-      const i = p * 4;
-      const wallLike = isLikelyWallPixel(data[i], data[i + 1], data[i + 2], sensitivity);
-      const isTextured = texture[p] > maxTexture;
-      const lowerBandLikelyFloor = y > height * 0.74 && texture[p] > lowerBandTextureCutoff;
-
-      if (wallLike && !isTextured && !lowerBandLikelyFloor) {
-        candidates[p] = 1;
-      }
-    }
-  }
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      let active = 0;
-      let total = 0;
-
-      for (let ny = y - 1; ny <= y + 1; ny += 1) {
-        if (ny < 0 || ny >= height) continue;
-        for (let nx = x - 1; nx <= x + 1; nx += 1) {
-          if (nx < 0 || nx >= width) continue;
-          total += 1;
-          if (candidates[ny * width + nx]) active += 1;
-        }
-      }
-
-      if (candidates[idx]) {
-        refined[idx] = active >= Math.min(3, total);
-      } else {
-        refined[idx] = active >= Math.min(5, total);
-      }
-    }
-  }
-
-  return { width, height, candidates: refined, texture };
-}
-
-function rgbDistanceSquared(a, b) {
-  const dr = a.r - b.r;
-  const dg = a.g - b.g;
-  const db = a.b - b.b;
-  return dr * dr + dg * dg + db * db;
-}
-
-function getPixelColor(pixels, x, y) {
-  const idx = (y * pixels.width + x) * 4;
-  return {
-    r: pixels.data[idx],
-    g: pixels.data[idx + 1],
-    b: pixels.data[idx + 2]
-  };
-}
-
-function findNearestCandidate(candidates, width, height, seedX, seedY, maxRadius = 28) {
-  const sx = clamp(seedX, 0, width - 1);
-  const sy = clamp(seedY, 0, height - 1);
-  const seedIdx = sy * width + sx;
-  if (candidates[seedIdx]) return { x: sx, y: sy };
-
-  for (let radius = 1; radius <= maxRadius; radius += 1) {
-    const left = Math.max(0, sx - radius);
-    const right = Math.min(width - 1, sx + radius);
-    const top = Math.max(0, sy - radius);
-    const bottom = Math.min(height - 1, sy + radius);
-
-    for (let x = left; x <= right; x += 1) {
-      const topIdx = top * width + x;
-      if (candidates[topIdx]) return { x, y: top };
-
-      const bottomIdx = bottom * width + x;
-      if (candidates[bottomIdx]) return { x, y: bottom };
-    }
-
-    for (let y = top + 1; y < bottom; y += 1) {
-      const leftIdx = y * width + left;
-      if (candidates[leftIdx]) return { x: left, y };
-
-      const rightIdx = y * width + right;
-      if (candidates[rightIdx]) return { x: right, y };
-    }
-  }
-
-  return null;
-}
-
-function growRegionWithColorConstraint(pixels, candidates, width, height, seed, sensitivity) {
-  const mask = new Uint8Array(width * height);
-  const queue = new Int32Array(width * height);
-  const seedColor = getPixelColor(pixels, seed.x, seed.y);
-  const seedTolerance = 35 + sensitivity * 1.1;
-  const meanTolerance = 28 + sensitivity * 0.95;
-  const seedToleranceSq = seedTolerance * seedTolerance;
-  const meanToleranceSq = meanTolerance * meanTolerance;
-
-  let head = 0;
-  let tail = 0;
-  let sumR = seedColor.r;
-  let sumG = seedColor.g;
-  let sumB = seedColor.b;
-  let count = 1;
-
-  const seedIdx = seed.y * width + seed.x;
-  mask[seedIdx] = 1;
-  queue[tail++] = seedIdx;
-
-  while (head < tail) {
-    const cur = queue[head++];
-    const x = cur % width;
-    const y = Math.floor(cur / width);
-
-    const meanColor = {
-      r: Math.round(sumR / count),
-      g: Math.round(sumG / count),
-      b: Math.round(sumB / count)
-    };
-
-    const neighbors = [
-      x > 0 ? cur - 1 : -1,
-      x < width - 1 ? cur + 1 : -1,
-      y > 0 ? cur - width : -1,
-      y < height - 1 ? cur + width : -1
-    ];
-
-    for (let n = 0; n < neighbors.length; n += 1) {
-      const idx = neighbors[n];
-      if (idx < 0 || mask[idx] || !candidates[idx]) continue;
-
-      const nx = idx % width;
-      const ny = Math.floor(idx / width);
-      const color = getPixelColor(pixels, nx, ny);
-      if (rgbDistanceSquared(color, seedColor) > seedToleranceSq) continue;
-      if (rgbDistanceSquared(color, meanColor) > meanToleranceSq) continue;
-
-      mask[idx] = 1;
-      queue[tail++] = idx;
-      sumR += color.r;
-      sumG += color.g;
-      sumB += color.b;
-      count += 1;
-    }
-  }
-
-  return mask;
-}
-
-function growRegion(candidates, width, height, seeds) {
-  const mask = new Uint8Array(width * height);
-  const queue = new Int32Array(width * height);
-  let head = 0;
-  let tail = 0;
-
-  function seed(x, y) {
-    if (x < 0 || y < 0 || x >= width || y >= height) return;
-    const idx = y * width + x;
-    if (!candidates[idx] || mask[idx]) return;
-    mask[idx] = 1;
-    queue[tail++] = idx;
-  }
-
-  seeds.forEach(([x, y]) => seed(x, y));
-
-  while (head < tail) {
-    const cur = queue[head++];
-    const x = cur % width;
-    const y = Math.floor(cur / width);
-
-    if (x > 0) {
-      const n = cur - 1;
-      if (candidates[n] && !mask[n]) {
-        mask[n] = 1;
-        queue[tail++] = n;
-      }
-    }
-
-    if (x < width - 1) {
-      const n = cur + 1;
-      if (candidates[n] && !mask[n]) {
-        mask[n] = 1;
-        queue[tail++] = n;
-      }
-    }
-
-    if (y > 0) {
-      const n = cur - width;
-      if (candidates[n] && !mask[n]) {
-        mask[n] = 1;
-        queue[tail++] = n;
-      }
-    }
-
-    if (y < height - 1) {
-      const n = cur + width;
-      if (candidates[n] && !mask[n]) {
-        mask[n] = 1;
-        queue[tail++] = n;
-      }
-    }
-  }
-
-  return mask;
-}
-
-function smoothMask(mask, width, height) {
-  function morph(src, mode) {
-    const out = new Uint8Array(src.length);
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        let active = 0;
-        let total = 0;
-        for (let ny = y - 1; ny <= y + 1; ny += 1) {
-          if (ny < 0 || ny >= height) continue;
-          for (let nx = x - 1; nx <= x + 1; nx += 1) {
-            if (nx < 0 || nx >= width) continue;
-            total += 1;
-            if (src[ny * width + nx]) active += 1;
-          }
-        }
-        out[y * width + x] = mode === "dilate" ? (active > 0 ? 1 : 0) : (active >= total ? 1 : 0);
-      }
-    }
-    return out;
-  }
-
-  return morph(morph(mask, "dilate"), "erode");
-}
-
-function createAutoMask(pixels, sensitivity) {
-  const { width, height, candidates } = createCandidatesMap(pixels, sensitivity);
-  const visited = new Uint8Array(width * height);
-  const queue = new Int32Array(width * height);
-  const components = [];
-
-  for (let i = 0; i < candidates.length; i += 1) {
-    if (!candidates[i] || visited[i]) continue;
-
-    let head = 0;
-    let tail = 0;
-    let area = 0;
-    let ySum = 0;
-    let xSum = 0;
-    const indices = [];
-
-    queue[tail++] = i;
-    visited[i] = 1;
-
-    while (head < tail) {
-      const cur = queue[head++];
-      indices.push(cur);
-      area += 1;
-      ySum += Math.floor(cur / width);
-      const x = cur % width;
-      xSum += x;
-
-      if (x > 0) {
-        const n = cur - 1;
-        if (candidates[n] && !visited[n]) {
-          visited[n] = 1;
-          queue[tail++] = n;
-        }
-      }
-
-      if (x < width - 1) {
-        const n = cur + 1;
-        if (candidates[n] && !visited[n]) {
-          visited[n] = 1;
-          queue[tail++] = n;
-        }
-      }
-
-      if (cur - width >= 0) {
-        const n = cur - width;
-        if (candidates[n] && !visited[n]) {
-          visited[n] = 1;
-          queue[tail++] = n;
-        }
-      }
-
-      if (cur + width < candidates.length) {
-        const n = cur + width;
-        if (candidates[n] && !visited[n]) {
-          visited[n] = 1;
-          queue[tail++] = n;
-        }
-      }
-    }
-
-    if (area < Math.max(300, Math.floor(candidates.length * 0.004))) continue;
-
-    const xNorm = (xSum / area) / width;
-    const yNorm = (ySum / area) / height;
-
-    if (yNorm > 0.78 && area < Math.floor(candidates.length * 0.35)) {
-      continue;
-    }
-
-    const verticalBias = clamp(1.4 - yNorm, 0.25, 1.4);
-    const centerBias = clamp(1.15 - Math.abs(xNorm - 0.5) * 1.6, 0.45, 1.15);
-    const score = area * verticalBias * centerBias;
-    components.push({ indices, score, area, yNorm });
-  }
-
-  if (!components.length) {
-    const seeds = [
-      [Math.floor(width * 0.5), Math.floor(height * 0.2)],
-      [Math.floor(width * 0.33), Math.floor(height * 0.25)],
-      [Math.floor(width * 0.66), Math.floor(height * 0.25)]
-    ];
-    return smoothMask(growRegion(candidates, width, height, seeds), width, height);
-  }
-
-  components.sort((a, b) => b.score - a.score);
-  const best = components[0];
-  const selected = [best];
-
-  for (let i = 1; i < components.length && selected.length < 3; i += 1) {
-    const candidate = components[i];
-    if (candidate.score < best.score * 0.42) continue;
-    if (candidate.area < best.area * 0.08) continue;
-    if (candidate.yNorm > 0.72) continue;
-    selected.push(candidate);
-  }
-
-  const mask = new Uint8Array(width * height);
-  selected.forEach((component) => {
-    component.indices.forEach((idx) => {
-      mask[idx] = 1;
-    });
-  });
-
-  for (let y = Math.floor(height * 0.84); y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      mask[y * width + x] = 0;
-    }
-  }
-
-  return smoothMask(mask, width, height);
-}
-
-function createSeedMask(pixels, sensitivity, seed) {
-  const { width, height, candidates, texture } = createCandidatesMap(pixels, sensitivity);
-  const sx = clamp(Math.round(seed.x), 0, width - 1);
-  const sy = clamp(Math.round(seed.y), 0, height - 1);
-  const resolvedSeed = findNearestCandidate(candidates, width, height, sx, sy);
-  if (!resolvedSeed) return createAutoMask(pixels, sensitivity);
-
-  const resolvedIdx = resolvedSeed.y * width + resolvedSeed.x;
-  if (resolvedSeed.y > height * 0.72 && texture[resolvedIdx] > clamp(12 + sensitivity * 0.55, 16, 42)) {
-    return createAutoMask(pixels, sensitivity);
-  }
-
-  const mask = growRegionWithColorConstraint(
-    pixels,
-    candidates,
-    width,
-    height,
-    resolvedSeed,
-    sensitivity
-  );
-  return smoothMask(mask, width, height);
-}
-
-function averageColorSample(pixels) {
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let count = 0;
-
-  for (let y = 0; y < pixels.height; y += 24) {
-    for (let x = 0; x < pixels.width; x += 24) {
-      const i = (y * pixels.width + x) * 4;
-      r += pixels.data[i];
-      g += pixels.data[i + 1];
-      b += pixels.data[i + 2];
-      count += 1;
-    }
-  }
-
-  return {
-    r: Math.round(r / count),
-    g: Math.round(g / count),
-    b: Math.round(b / count)
-  };
-}
-
-function buildSuggestions(base) {
-  const catalog = SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES;
-  return catalog
-    .map((s) => {
-      const rgb = hexToRgb(s.hex);
-      return {
-        ...s,
-        d: Math.sqrt((base.r - rgb.r) ** 2 + (base.g - rgb.g) ** 2 + (base.b - rgb.b) ** 2)
-      };
-    })
-    .sort((a, b) => a.d - b.d)
-    .slice(0, 6);
 }
 
 function createZone(label, shadeHex) {
@@ -1150,46 +559,6 @@ function setControlsEnabled(enabled) {
   });
   // Leads inbox is always available (even with no current preview)
   if (leadsBtn) leadsBtn.disabled = false;
-}
-
-function toAlphaMask(binaryMask) {
-  const alphaMask = new Uint8Array(binaryMask.length);
-  for (let i = 0; i < binaryMask.length; i += 1) {
-    alphaMask[i] = binaryMask[i] ? 255 : 0;
-  }
-  return alphaMask;
-}
-
-function createFeatheredAlphaMask(binaryMask, width, height, featherRadius) {
-  if (featherRadius <= 0) return toAlphaMask(binaryMask);
-
-  const alphaMask = new Uint8Array(binaryMask.length);
-  const radius = Math.max(1, featherRadius);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      if (!binaryMask[idx]) {
-        alphaMask[idx] = 0;
-        continue;
-      }
-
-      let active = 0;
-      let total = 0;
-      for (let ny = y - radius; ny <= y + radius; ny += 1) {
-        if (ny < 0 || ny >= height) continue;
-        for (let nx = x - radius; nx <= x + radius; nx += 1) {
-          if (nx < 0 || nx >= width) continue;
-          total += 1;
-          if (binaryMask[ny * width + nx]) active += 1;
-        }
-      }
-
-      alphaMask[idx] = Math.round((active / total) * 255);
-    }
-  }
-
-  return alphaMask;
 }
 
 function renderZoneTabs() {
@@ -1347,37 +716,6 @@ function adoptCurrentMaskForManualEditing(zone, pixels, sensitivity) {
   zone.manualEnabled = true;
   zone.seed = null;
   invalidateZoneAuto(zone);
-}
-
-function applyTint(data, width, height, alphaMask, shadeRgb, opacity, useNatural) {
-  const blend = opacity / 100;
-  const target = useNatural ? rgbToHsl(shadeRgb.r, shadeRgb.g, shadeRgb.b) : null;
-
-  for (let p = 0, i = 0; p < width * height; p += 1, i += 4) {
-    const localAlpha = alphaMask[p] / 255;
-    if (localAlpha <= 0) continue;
-    const localBlend = blend * localAlpha;
-
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-
-    if (useNatural) {
-      const src = rgbToHsl(r, g, b);
-      const mapped = hslToRgb(
-        target.h,
-        clamp(src.s * 0.35 + target.s * 0.65, 0, 1),
-        clamp(src.l * 0.9 + target.l * 0.1, 0, 1)
-      );
-      data[i] = Math.round(r * (1 - localBlend) + mapped.r * localBlend);
-      data[i + 1] = Math.round(g * (1 - localBlend) + mapped.g * localBlend);
-      data[i + 2] = Math.round(b * (1 - localBlend) + mapped.b * localBlend);
-    } else {
-      data[i] = Math.round(r * (1 - localBlend) + shadeRgb.r * localBlend);
-      data[i + 1] = Math.round(g * (1 - localBlend) + shadeRgb.g * localBlend);
-      data[i + 2] = Math.round(b * (1 - localBlend) + shadeRgb.b * localBlend);
-    }
-  }
 }
 
 function renderTinted(pixels, compareHex = null) {
@@ -1694,7 +1032,7 @@ function initializeShadesFromImage() {
   const pixels = previewCtx.getImageData(fit.dx, fit.dy, fit.drawWidth, fit.drawHeight);
   const dominant = averageColorSample(pixels);
 
-  state.shades = buildSuggestions(dominant);
+  state.shades = buildSuggestions(dominant, SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES);
   state.activeShade = state.shades[0];
   state.compareShade = state.shades[1] || state.shades[0];
 
@@ -2887,10 +2225,6 @@ const QUOTE_ALL_STATUSES = ["draft", "sent", "accepted", "rejected", "converted"
 const CLIENT_QUOTE_STATUSES = ["draft", "sent", "accepted", "rejected"];
 const ORDER_STATUSES = ["pending", "confirmed", "fulfilled", "cancelled"];
 
-function statusBadge(status, labels) {
-  return `<span class="status-badge ${status}">${labels[status] || status}</span>`;
-}
-
 function blankItem() {
   return { description: "", brand: "", quantity: 1, unitPrice: 0, unit: "litre", shadeId: "" };
 }
@@ -3689,13 +3023,6 @@ function ledgerCard(c) {
   return card;
 }
 
-function overdueDaysLabel(dateStr) {
-  if (!dateStr) return "";
-  const due = new Date(dateStr);
-  const days = Math.floor((Date.now() - due.getTime()) / 86400000);
-  return days > 0 ? `${days}d` : "";
-}
-
 async function openLedgerDetail(customerId) {
   if (!ledgerDetailModal || !ledgerDetailBody) return;
   currentLedgerCustomerId = customerId;
@@ -3709,12 +3036,6 @@ async function openLedgerDetail(customerId) {
     return;
   }
   renderLedgerDetail(ledger);
-}
-
-function balanceSummaryLine(balance) {
-  if (balance > 0.005) return `<strong class="ledger-owes">${fmtMoney(balance)}</strong> outstanding`;
-  if (balance < -0.005) return `<strong class="ledger-credit">${fmtMoney(-balance)}</strong> in credit`;
-  return `<strong>Settled</strong>`;
 }
 
 function renderLedgerDetail(ledger) {
@@ -3828,10 +3149,6 @@ function closeLedgerDetail() {
 }
 
 /* ===================== Phase 3: Pilot Validation Analytics ===================== */
-
-function generateEventId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
 
 function loadAnalytics() {
   try {
