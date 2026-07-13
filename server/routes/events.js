@@ -1,6 +1,6 @@
 const express = require("express");
 const { query } = require("../lib/db");
-const { optionalAuth } = require("../middleware/auth");
+const { requireAuth, optionalAuth } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -47,12 +47,8 @@ router.post("/", optionalAuth, async (req, res, next) => {
 });
 
 // GET /api/events/summary — funnel analytics summary (requires auth)
-router.get("/summary", async (req, res, next) => {
+router.get("/summary", requireAuth, async (req, res, next) => {
   try {
-    if (!req.tenant) {
-      return res.status(401).json({ error: "Auth required for summary" });
-    }
-
     const tenantId = req.tenant.id;
 
     // Sessions in last 30 days
@@ -142,12 +138,8 @@ router.get("/summary", async (req, res, next) => {
 });
 
 // GET /api/events — raw events list (auth required, last 500)
-router.get("/", async (req, res, next) => {
+router.get("/", requireAuth, async (req, res, next) => {
   try {
-    if (!req.tenant) {
-      return res.status(401).json({ error: "Auth required" });
-    }
-
     const result = await query(
       `SELECT id, session_id, event_type, payload_json, ts
        FROM events 

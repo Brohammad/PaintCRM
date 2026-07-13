@@ -1,37 +1,32 @@
 const { Pool } = require('pg');
-const path = require('path');
+const { dbQueryDuration } = require('./metrics');
 
-// Database configuration
+// SSL is enabled in production by default, but can be forced on/off with DB_SSL
+// (true/false | require/disable). Fly.io's internal Postgres runs over a private
+// network without TLS (DB_SSL=false); managed providers (Neon, Supabase, RDS)
+// need SSL, often with DB_SSL_REJECT_UNAUTHORIZED=false for their chain.
+const sslConfig = (() => {
+  const flag = (process.env.DB_SSL || '').toLowerCase();
+  if (flag === 'false' || flag === 'disable') return false;
+  const enabled = flag === 'true' || flag === 'require' || process.env.NODE_ENV === 'production';
+  if (!enabled) return false;
+  return { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' };
+})();
+
 const config = {
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/paintcrm',
-  max: 20, // Maximum pool size
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 2000, // Return error after 2 seconds if connection not established
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+  ssl: sslConfig,
 };
 
-// Create pool
 const pool = new Pool(config);
 
-// Pool event handlers for monitoring
-pool.on('connect', (client) => {
-  console.log('New database connection established');
+pool.on('error', (err) => {
+  console.error('Unexpected database pool error:', err.message);
 });
 
-pool.on('acquire', (client) => {
-  console.log('Client acquired from pool');
-});
-
-pool.on('remove', (client) => {
-  console.log('Client removed from pool');
-});
-
-pool.on('error', (err, client) => {
-  console.error('Unexpected database error:', err);
-  process.exit(-1);
-});
-
-// Health check function
 async function checkHealth() {
   const client = await pool.connect();
   try {
@@ -44,7 +39,6 @@ async function checkHealth() {
   }
 }
 
-// Transaction helper
 async function withTransaction(callback) {
   const client = await pool.connect();
   try {
@@ -60,31 +54,22 @@ async function withTransaction(callback) {
   }
 }
 
-// Query helper with logging
 async function query(text, params) {
-  const start = Date.now();
+  const queryType = text.trim().split(/\s+/)[0].toUpperCase();
+  const end = dbQueryDuration.startTimer({ query_type: queryType });
   try {
     const result = await pool.query(text, params);
-    const duration = Date.now() - start;
-    console.log('Executed query', { text: text.substring(0, 100), duration, rows: result.rowCount });
+    end();
     return result;
   } catch (err) {
+    end();
     console.error('Query error', { text: text.substring(0, 100), error: err.message });
     throw err;
   }
 }
 
-// Graceful shutdown
 async function closePool() {
-  console.log('Closing database pool...');
   await pool.end();
-  console.log('Database pool closed');
 }
 
-module.exports = {
-  pool,
-  query,
-  withTransaction,
-  checkHealth,
-  closePool
-};
+module.exports = { pool, query, withTransaction, checkHealth, closePool };

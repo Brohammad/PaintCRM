@@ -1,3 +1,46 @@
+import { escHtml, fmtMoney, round2 } from "./src/utils.js";
+import {
+  apiRequest,
+  getApiToken,
+  getRefreshToken,
+  setSession,
+  clearTokens,
+  setUnauthorizedHandler,
+} from "./src/api.js";
+import { createPaginator, withPageParams } from "./src/pagination.js";
+import {
+  clamp,
+  hexToRgb,
+  rgbToHsl,
+  hslToRgb,
+  rgbDistanceSquared,
+  getPixelColor,
+} from "./src/color.js";
+import {
+  isWallLikeLabel,
+  smoothMask,
+  dilateMask,
+  extractMaskFromSegmentation,
+  fuseMasksWithMl,
+  isLikelyWallPixel,
+  createCandidatesMap,
+  findNearestCandidate,
+  growRegionWithColorConstraint,
+  growRegion,
+  createAutoMask,
+  createSeedMask,
+  averageColorSample,
+} from "./src/segmentation.js";
+import {
+  toAlphaMask,
+  createFeatheredAlphaMask,
+  applyTint,
+  buildSuggestions,
+} from "./src/tint.js";
+import { estimatePaint } from "./src/cost.js";
+import { statusBadge, overdueDaysLabel, balanceSummaryLine } from "./src/format.js";
+import { generateLeadId, generateEventId } from "./src/ids.js";
+
 const imageInput = document.getElementById("imageInput");
 const exportBtn = document.getElementById("exportBtn");
 const beforeAfterToggle = document.getElementById("beforeAfterToggle");
@@ -56,6 +99,133 @@ const closeDetailBtn = document.getElementById("closeDetailBtn");
 const leadDetailBody = document.getElementById("leadDetailBody");
 const deleteLeadBtn = document.getElementById("deleteLeadBtn");
 const exportLeadBtn = document.getElementById("exportLeadBtn");
+
+// Phase 5 CRM elements
+const customersBtn = document.getElementById("customersBtn");
+const customersModal = document.getElementById("customersModal");
+const customersListEl = document.getElementById("customersList");
+const customersSignInPrompt = document.getElementById("customersSignInPrompt");
+const customersPanel = document.getElementById("customersPanel");
+const customerSearchInput = document.getElementById("customerSearchInput");
+const newCustomerBtn = document.getElementById("newCustomerBtn");
+const closeCustomersBtn = document.getElementById("closeCustomersBtn");
+const closeCustomers2Btn = document.getElementById("closeCustomers2Btn");
+const customerDetailModal = document.getElementById("customerDetailModal");
+const customerDetailBody = document.getElementById("customerDetailBody");
+const closeCustomerDetailBtn = document.getElementById("closeCustomerDetailBtn");
+const closeCustomerDetail2Btn = document.getElementById("closeCustomerDetail2Btn");
+const addSiteBtn = document.getElementById("addSiteBtn");
+const newCustomerModal = document.getElementById("newCustomerModal");
+const newCustomerForm = document.getElementById("newCustomerForm");
+const closeNewCustomerBtn = document.getElementById("closeNewCustomerBtn");
+const cancelNewCustomerBtn = document.getElementById("cancelNewCustomerBtn");
+const leadCustomerField = document.getElementById("leadCustomerField");
+const leadSiteField = document.getElementById("leadSiteField");
+const leadCustomerSelect = document.getElementById("leadCustomerSelect");
+const leadSiteSelect = document.getElementById("leadSiteSelect");
+const deleteCustomerBtn = document.getElementById("deleteCustomerBtn");
+const editCustomerBtn = document.getElementById("editCustomerBtn");
+const newCustomerTitle = document.getElementById("newCustomerTitle");
+const saveCustomerBtn = document.getElementById("saveCustomerBtn");
+const siteModal = document.getElementById("siteModal");
+const siteForm = document.getElementById("siteForm");
+const closeSiteBtn = document.getElementById("closeSiteBtn");
+const cancelSiteBtn = document.getElementById("cancelSiteBtn");
+
+let crmCustomers = [];
+let currentCustomerId = null;
+let currentCustomerObj = null;
+let editingCustomerId = null;
+
+// Phase 6 commerce elements (Quotes & Orders)
+const quotesBtn = document.getElementById("quotesBtn");
+const quotesModal = document.getElementById("quotesModal");
+const quotesSignInPrompt = document.getElementById("quotesSignInPrompt");
+const quotesPanel = document.getElementById("quotesPanel");
+const closeQuotesBtn = document.getElementById("closeQuotesBtn");
+const closeQuotes2Btn = document.getElementById("closeQuotes2Btn");
+const quotesTabBtn = document.getElementById("quotesTabBtn");
+const ordersTabBtn = document.getElementById("ordersTabBtn");
+const docStatusFilter = document.getElementById("docStatusFilter");
+const newQuoteBtn = document.getElementById("newQuoteBtn");
+const docList = document.getElementById("docList");
+const quoteFormModal = document.getElementById("quoteFormModal");
+const quoteForm = document.getElementById("quoteForm");
+const quoteFormTitle = document.getElementById("quoteFormTitle");
+const closeQuoteFormBtn = document.getElementById("closeQuoteFormBtn");
+const cancelQuoteFormBtn = document.getElementById("cancelQuoteFormBtn");
+const saveQuoteBtn = document.getElementById("saveQuoteBtn");
+const quoteCustomerSelect = document.getElementById("quoteCustomerSelect");
+const quoteSiteSelect = document.getElementById("quoteSiteSelect");
+const quoteItemsList = document.getElementById("quoteItemsList");
+const quoteShadePicker = document.getElementById("quoteShadePicker");
+const addQuoteItemBtn = document.getElementById("addQuoteItemBtn");
+const quoteDiscount = document.getElementById("quoteDiscount");
+const quoteTaxRate = document.getElementById("quoteTaxRate");
+const quoteNotes = document.getElementById("quoteNotes");
+const quoteTotals = document.getElementById("quoteTotals");
+const quoteFormError = document.getElementById("quoteFormError");
+const docDetailModal = document.getElementById("docDetailModal");
+const docDetailTitle = document.getElementById("docDetailTitle");
+const docDetailBody = document.getElementById("docDetailBody");
+const docDetailActions = document.getElementById("docDetailActions");
+const closeDocDetailBtn = document.getElementById("closeDocDetailBtn");
+
+let commerceTab = "quotes";
+let editingQuoteId = null;
+let currentDoc = null;
+
+// Phase 6 inventory elements
+const inventoryBtn = document.getElementById("inventoryBtn");
+const inventoryModal = document.getElementById("inventoryModal");
+const inventorySignInPrompt = document.getElementById("inventorySignInPrompt");
+const inventoryPanel = document.getElementById("inventoryPanel");
+const inventorySummary = document.getElementById("inventorySummary");
+const inventorySearchInput = document.getElementById("inventorySearchInput");
+const inventoryStatusFilter = document.getElementById("inventoryStatusFilter");
+const newInventoryBtn = document.getElementById("newInventoryBtn");
+const inventoryList = document.getElementById("inventoryList");
+const closeInventoryBtn = document.getElementById("closeInventoryBtn");
+const closeInventory2Btn = document.getElementById("closeInventory2Btn");
+const inventoryFormModal = document.getElementById("inventoryFormModal");
+const inventoryForm = document.getElementById("inventoryForm");
+const inventoryFormTitle = document.getElementById("inventoryFormTitle");
+const closeInventoryFormBtn = document.getElementById("closeInventoryFormBtn");
+const cancelInventoryFormBtn = document.getElementById("cancelInventoryFormBtn");
+const saveInventoryBtn = document.getElementById("saveInventoryBtn");
+const invShadePicker = document.getElementById("invShadePicker");
+const invQtyField = document.getElementById("invQtyField");
+const inventoryFormError = document.getElementById("inventoryFormError");
+const inventoryDetailModal = document.getElementById("inventoryDetailModal");
+const inventoryDetailTitle = document.getElementById("inventoryDetailTitle");
+const inventoryDetailBody = document.getElementById("inventoryDetailBody");
+const deleteInventoryBtn = document.getElementById("deleteInventoryBtn");
+const editInventoryBtn = document.getElementById("editInventoryBtn");
+const closeInventoryDetailBtn = document.getElementById("closeInventoryDetailBtn");
+const closeInventoryDetail2Btn = document.getElementById("closeInventoryDetail2Btn");
+
+let editingInventoryId = null;
+let currentInventoryId = null;
+let currentInventoryObj = null;
+
+// Phase 6 credit-ledger elements
+const ledgerBtn = document.getElementById("ledgerBtn");
+const ledgerModal = document.getElementById("ledgerModal");
+const ledgerSignInPrompt = document.getElementById("ledgerSignInPrompt");
+const ledgerPanel = document.getElementById("ledgerPanel");
+const ledgerSummary = document.getElementById("ledgerSummary");
+const ledgerSearchInput = document.getElementById("ledgerSearchInput");
+const ledgerFilter = document.getElementById("ledgerFilter");
+const ledgerList = document.getElementById("ledgerList");
+const closeLedgerBtn = document.getElementById("closeLedgerBtn");
+const closeLedger2Btn = document.getElementById("closeLedger2Btn");
+const ledgerDetailModal = document.getElementById("ledgerDetailModal");
+const ledgerDetailTitle = document.getElementById("ledgerDetailTitle");
+const ledgerDetailBody = document.getElementById("ledgerDetailBody");
+const closeLedgerDetailBtn = document.getElementById("closeLedgerDetailBtn");
+const closeLedgerDetail2Btn = document.getElementById("closeLedgerDetail2Btn");
+
+let currentLedgerCustomerId = null;
 
 const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
@@ -128,9 +298,19 @@ let currentDetailLeadId = null;
 const ANALYTICS_STORAGE_KEY = "paintcrm_analytics_v1";
 const DEALER_STORAGE_KEY = "paintcrm_dealer_v1";
 
-// Phase 4: backend API
-const API_TOKEN_KEY = "paintcrm_api_token_v1";
-const API_TENANT_KEY = "paintcrm_api_tenant_v1";
+// Phase 4: backend API — token storage + apiRequest live in ./src/api.js.
+// Guests who chose "continue without an account" get this flag so the auth
+// gate lets them use the offline features without a session.
+const GUEST_MODE_KEY = "paintcrm_guest_v1";
+function isGuestMode() {
+  try { return localStorage.getItem(GUEST_MODE_KEY) === "1"; } catch { return false; }
+}
+function exitGuestMode() {
+  try { localStorage.removeItem(GUEST_MODE_KEY); } catch { /* nothing */ }
+}
+
+// Phase 5: CRM offline cache
+const CUSTOMERS_CACHE_KEY = "paintcrm_customers_cache_v1";
 let apiTenant = null; // { id, shopName, dealerName, phone, email }
 
 let analyticsEvents = [];
@@ -141,6 +321,13 @@ let pilotFirstActionTs = null;
 let dealerSettings = { shopName: "", dealerName: "", phone: "" };
 
 async function loadShadeCatalog() {
+  if (getApiToken()) {
+    const { data, error } = await apiRequest("GET", "/api/shades");
+    if (!error && data?.shades?.length) {
+      SHADE_CATALOG = data.shades;
+      return;
+    }
+  }
   try {
     const res = await fetch("shades.json");
     if (!res.ok) throw new Error("fetch failed");
@@ -148,6 +335,23 @@ async function loadShadeCatalog() {
   } catch {
     SHADE_CATALOG = FALLBACK_SWATCHES;
   }
+}
+
+function getCurrentCostEstimate() {
+  const zone = getActiveZone();
+  if (!zone) return null;
+  const entry = catalogEntry({ hex: zone.shadeHex });
+  const est = estimatePaint({
+    pricePerL: entry?.pricePerL,
+    roomSqM: ROOM_SQ_M,
+    coveragePerL: COVERAGE_SQ_M_PER_L,
+  });
+  if (!est) return null;
+  return {
+    ...est,
+    shadeName: entry.name,
+    brand: entry.brand || "",
+  };
 }
 
 function findShadeInCatalog(hex) {
@@ -163,90 +367,18 @@ function catalogEntry(shade) {
 function updateCostEstimate(shade) {
   if (!shade || !costEstimateEl) return;
   const entry = catalogEntry(shade);
-  if (!entry.pricePerL) {
+  const est = estimatePaint({
+    pricePerL: entry.pricePerL,
+    roomSqM: ROOM_SQ_M,
+    coveragePerL: COVERAGE_SQ_M_PER_L,
+  });
+  if (!est) {
     costEstimateEl.classList.add("hidden");
     return;
   }
-  const litres = Math.ceil((ROOM_SQ_M * 2) / COVERAGE_SQ_M_PER_L); // 2 coats
-  const total = litres * entry.pricePerL;
-  costLitresEl.textContent = `~${litres}L for a standard room (2 coats)`;
-  costTotalEl.textContent = `Est. ₹${total.toLocaleString("en-IN")} @ ₹${entry.pricePerL}/L`;
+  costLitresEl.textContent = `~${est.litres}L for a standard room (${est.coats} coats)`;
+  costTotalEl.textContent = `Est. ₹${est.totalInr.toLocaleString("en-IN")} @ ₹${est.pricePerL}/L`;
   costEstimateEl.classList.remove("hidden");
-}
-
-function clamp(v, min, max) {
-  return Math.min(max, Math.max(min, v));
-}
-
-function hexToRgb(hex) {
-  const clean = hex.replace("#", "");
-  const normalized = clean.length === 3
-    ? clean.split("").map((c) => c + c).join("")
-    : clean;
-  const value = Number.parseInt(normalized, 16);
-  return {
-    r: (value >> 16) & 255,
-    g: (value >> 8) & 255,
-    b: value & 255
-  };
-}
-
-function rgbToHsl(r, g, b) {
-  const rn = r / 255;
-  const gn = g / 255;
-  const bn = b / 255;
-  const max = Math.max(rn, gn, bn);
-  const min = Math.min(rn, gn, bn);
-  const delta = max - min;
-  let h = 0;
-  const l = (max + min) / 2;
-  let s = 0;
-
-  if (delta !== 0) {
-    s = delta / (1 - Math.abs(2 * l - 1));
-    if (max === rn) h = ((gn - bn) / delta) % 6;
-    else if (max === gn) h = (bn - rn) / delta + 2;
-    else h = (rn - gn) / delta + 4;
-    h = (h * 60 + 360) % 360;
-  }
-
-  return { h, s, l };
-}
-
-function hslToRgb(h, s, l) {
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const hp = h / 60;
-  const x = c * (1 - Math.abs((hp % 2) - 1));
-  let r1 = 0;
-  let g1 = 0;
-  let b1 = 0;
-
-  if (hp < 1) {
-    r1 = c;
-    g1 = x;
-  } else if (hp < 2) {
-    r1 = x;
-    g1 = c;
-  } else if (hp < 3) {
-    g1 = c;
-    b1 = x;
-  } else if (hp < 4) {
-    g1 = x;
-    b1 = c;
-  } else if (hp < 5) {
-    r1 = x;
-    b1 = c;
-  } else {
-    r1 = c;
-    b1 = x;
-  }
-
-  const m = l - c / 2;
-  return {
-    r: Math.round((r1 + m) * 255),
-    g: Math.round((g1 + m) * 255),
-    b: Math.round((b1 + m) * 255)
-  };
 }
 
 function drawImageFit(ctx, image, canvas) {
@@ -309,95 +441,6 @@ async function ensureMlModel() {
   }
 }
 
-function isWallLikeLabel(label) {
-  return /wall|building|house|skyscraper|ceiling/i.test(label);
-}
-
-function extractMaskFromSegmentation(segmentation, targetWidth, targetHeight) {
-  if (!segmentation || !segmentation.width || !segmentation.height || !segmentation.segmentationMap) {
-    return null;
-  }
-
-  const srcWidth = segmentation.width;
-  const srcHeight = segmentation.height;
-  const srcMap = segmentation.segmentationMap;
-  const legend = segmentation.legend || {};
-
-  const wallColors = new Set();
-  Object.entries(legend).forEach(([label, color]) => {
-    if (!Array.isArray(color) || color.length < 3) return;
-    if (!isWallLikeLabel(label)) return;
-    wallColors.add(`${color[0]}:${color[1]}:${color[2]}`);
-  });
-
-  if (!wallColors.size || srcMap.length < srcWidth * srcHeight * 3) return null;
-
-  const srcMask = new Uint8Array(srcWidth * srcHeight);
-  for (let p = 0, i = 0; p < srcMask.length; p += 1, i += 4) {
-    const key = `${srcMap[i]}:${srcMap[i + 1]}:${srcMap[i + 2]}`;
-    if (wallColors.has(key)) srcMask[p] = 1;
-  }
-
-  const out = new Uint8Array(targetWidth * targetHeight);
-  for (let y = 0; y < targetHeight; y += 1) {
-    const sy = Math.min(srcHeight - 1, Math.floor((y / targetHeight) * srcHeight));
-    for (let x = 0; x < targetWidth; x += 1) {
-      const sx = Math.min(srcWidth - 1, Math.floor((x / targetWidth) * srcWidth));
-      out[y * targetWidth + x] = srcMask[sy * srcWidth + sx];
-    }
-  }
-
-  return smoothMask(out, targetWidth, targetHeight);
-}
-
-function dilateMask(mask, width, height, radius) {
-  if (radius <= 0) return new Uint8Array(mask);
-  const out = new Uint8Array(mask.length);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      if (!mask[idx]) continue;
-      for (let ny = y - radius; ny <= y + radius; ny += 1) {
-        if (ny < 0 || ny >= height) continue;
-        for (let nx = x - radius; nx <= x + radius; nx += 1) {
-          if (nx < 0 || nx >= width) continue;
-          out[ny * width + nx] = 1;
-        }
-      }
-    }
-  }
-
-  return out;
-}
-
-function fuseMasksWithMl(heuristicMask, mlMask, width, height) {
-  if (!mlMask) return heuristicMask;
-  const mlDilated = dilateMask(mlMask, width, height, 2);
-  const fused = new Uint8Array(heuristicMask.length);
-  let heuristicCount = 0;
-  let fusedCount = 0;
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      const h = heuristicMask[idx];
-      const m = mlMask[idx];
-      if (h) heuristicCount += 1;
-
-      const keep = m || (h && (mlDilated[idx] || y < height * 0.52));
-      if (keep) {
-        fused[idx] = 1;
-        fusedCount += 1;
-      }
-    }
-  }
-
-  if (!heuristicCount) return fused;
-  if (fusedCount < heuristicCount * 0.25) return heuristicMask;
-  return smoothMask(fused, width, height);
-}
-
 async function runMlSegmentationForCurrentImage() {
   if (!state.originalImage || !state.imageRect) return;
   if (!mlAssistToggle.checked) return;
@@ -434,460 +477,6 @@ async function runMlSegmentationForCurrentImage() {
     state.mlMask = null;
     setMlStatus("ML: segmentation failed (fallback active)", "error");
   }
-}
-
-function isLikelyWallPixel(r, g, b, sensitivity) {
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const sat = max === 0 ? 0 : (max - min) / max;
-  const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
-  return sat < clamp(sensitivity / 100, 0.1, 0.62) && brightness > 40 && brightness < 240;
-}
-
-function createCandidatesMap(pixels, sensitivity) {
-  const { width, height, data } = pixels;
-  const candidates = new Uint8Array(width * height);
-  const refined = new Uint8Array(width * height);
-  const luminance = new Uint8Array(width * height);
-  const texture = new Uint8Array(width * height);
-  let textureSum = 0;
-
-  for (let p = 0, i = 0; p < luminance.length; p += 1, i += 4) {
-    luminance[p] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-  }
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      const l = luminance[idx];
-      let delta = 0;
-      let count = 0;
-
-      if (x > 0) {
-        delta += Math.abs(l - luminance[idx - 1]);
-        count += 1;
-      }
-      if (x < width - 1) {
-        delta += Math.abs(l - luminance[idx + 1]);
-        count += 1;
-      }
-      if (y > 0) {
-        delta += Math.abs(l - luminance[idx - width]);
-        count += 1;
-      }
-      if (y < height - 1) {
-        delta += Math.abs(l - luminance[idx + width]);
-        count += 1;
-      }
-
-      texture[idx] = count > 0 ? Math.round(delta / count) : 0;
-      textureSum += texture[idx];
-    }
-  }
-
-  const textureMean = textureSum / texture.length;
-  const maxTexture = clamp(textureMean * 1.75 + sensitivity * 0.45, 16, 62);
-  const lowerBandTextureCutoff = clamp(textureMean * 1.25 + sensitivity * 0.3, 14, 44);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const p = y * width + x;
-      const i = p * 4;
-      const wallLike = isLikelyWallPixel(data[i], data[i + 1], data[i + 2], sensitivity);
-      const isTextured = texture[p] > maxTexture;
-      const lowerBandLikelyFloor = y > height * 0.74 && texture[p] > lowerBandTextureCutoff;
-
-      if (wallLike && !isTextured && !lowerBandLikelyFloor) {
-        candidates[p] = 1;
-      }
-    }
-  }
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      let active = 0;
-      let total = 0;
-
-      for (let ny = y - 1; ny <= y + 1; ny += 1) {
-        if (ny < 0 || ny >= height) continue;
-        for (let nx = x - 1; nx <= x + 1; nx += 1) {
-          if (nx < 0 || nx >= width) continue;
-          total += 1;
-          if (candidates[ny * width + nx]) active += 1;
-        }
-      }
-
-      if (candidates[idx]) {
-        refined[idx] = active >= Math.min(3, total);
-      } else {
-        refined[idx] = active >= Math.min(5, total);
-      }
-    }
-  }
-
-  return { width, height, candidates: refined, texture };
-}
-
-function rgbDistanceSquared(a, b) {
-  const dr = a.r - b.r;
-  const dg = a.g - b.g;
-  const db = a.b - b.b;
-  return dr * dr + dg * dg + db * db;
-}
-
-function getPixelColor(pixels, x, y) {
-  const idx = (y * pixels.width + x) * 4;
-  return {
-    r: pixels.data[idx],
-    g: pixels.data[idx + 1],
-    b: pixels.data[idx + 2]
-  };
-}
-
-function findNearestCandidate(candidates, width, height, seedX, seedY, maxRadius = 28) {
-  const sx = clamp(seedX, 0, width - 1);
-  const sy = clamp(seedY, 0, height - 1);
-  const seedIdx = sy * width + sx;
-  if (candidates[seedIdx]) return { x: sx, y: sy };
-
-  for (let radius = 1; radius <= maxRadius; radius += 1) {
-    const left = Math.max(0, sx - radius);
-    const right = Math.min(width - 1, sx + radius);
-    const top = Math.max(0, sy - radius);
-    const bottom = Math.min(height - 1, sy + radius);
-
-    for (let x = left; x <= right; x += 1) {
-      const topIdx = top * width + x;
-      if (candidates[topIdx]) return { x, y: top };
-
-      const bottomIdx = bottom * width + x;
-      if (candidates[bottomIdx]) return { x, y: bottom };
-    }
-
-    for (let y = top + 1; y < bottom; y += 1) {
-      const leftIdx = y * width + left;
-      if (candidates[leftIdx]) return { x: left, y };
-
-      const rightIdx = y * width + right;
-      if (candidates[rightIdx]) return { x: right, y };
-    }
-  }
-
-  return null;
-}
-
-function growRegionWithColorConstraint(pixels, candidates, width, height, seed, sensitivity) {
-  const mask = new Uint8Array(width * height);
-  const queue = new Int32Array(width * height);
-  const seedColor = getPixelColor(pixels, seed.x, seed.y);
-  const seedTolerance = 35 + sensitivity * 1.1;
-  const meanTolerance = 28 + sensitivity * 0.95;
-  const seedToleranceSq = seedTolerance * seedTolerance;
-  const meanToleranceSq = meanTolerance * meanTolerance;
-
-  let head = 0;
-  let tail = 0;
-  let sumR = seedColor.r;
-  let sumG = seedColor.g;
-  let sumB = seedColor.b;
-  let count = 1;
-
-  const seedIdx = seed.y * width + seed.x;
-  mask[seedIdx] = 1;
-  queue[tail++] = seedIdx;
-
-  while (head < tail) {
-    const cur = queue[head++];
-    const x = cur % width;
-    const y = Math.floor(cur / width);
-
-    const meanColor = {
-      r: Math.round(sumR / count),
-      g: Math.round(sumG / count),
-      b: Math.round(sumB / count)
-    };
-
-    const neighbors = [
-      x > 0 ? cur - 1 : -1,
-      x < width - 1 ? cur + 1 : -1,
-      y > 0 ? cur - width : -1,
-      y < height - 1 ? cur + width : -1
-    ];
-
-    for (let n = 0; n < neighbors.length; n += 1) {
-      const idx = neighbors[n];
-      if (idx < 0 || mask[idx] || !candidates[idx]) continue;
-
-      const nx = idx % width;
-      const ny = Math.floor(idx / width);
-      const color = getPixelColor(pixels, nx, ny);
-      if (rgbDistanceSquared(color, seedColor) > seedToleranceSq) continue;
-      if (rgbDistanceSquared(color, meanColor) > meanToleranceSq) continue;
-
-      mask[idx] = 1;
-      queue[tail++] = idx;
-      sumR += color.r;
-      sumG += color.g;
-      sumB += color.b;
-      count += 1;
-    }
-  }
-
-  return mask;
-}
-
-function growRegion(candidates, width, height, seeds) {
-  const mask = new Uint8Array(width * height);
-  const queue = new Int32Array(width * height);
-  let head = 0;
-  let tail = 0;
-
-  function seed(x, y) {
-    if (x < 0 || y < 0 || x >= width || y >= height) return;
-    const idx = y * width + x;
-    if (!candidates[idx] || mask[idx]) return;
-    mask[idx] = 1;
-    queue[tail++] = idx;
-  }
-
-  seeds.forEach(([x, y]) => seed(x, y));
-
-  while (head < tail) {
-    const cur = queue[head++];
-    const x = cur % width;
-    const y = Math.floor(cur / width);
-
-    if (x > 0) {
-      const n = cur - 1;
-      if (candidates[n] && !mask[n]) {
-        mask[n] = 1;
-        queue[tail++] = n;
-      }
-    }
-
-    if (x < width - 1) {
-      const n = cur + 1;
-      if (candidates[n] && !mask[n]) {
-        mask[n] = 1;
-        queue[tail++] = n;
-      }
-    }
-
-    if (y > 0) {
-      const n = cur - width;
-      if (candidates[n] && !mask[n]) {
-        mask[n] = 1;
-        queue[tail++] = n;
-      }
-    }
-
-    if (y < height - 1) {
-      const n = cur + width;
-      if (candidates[n] && !mask[n]) {
-        mask[n] = 1;
-        queue[tail++] = n;
-      }
-    }
-  }
-
-  return mask;
-}
-
-function smoothMask(mask, width, height) {
-  function morph(src, mode) {
-    const out = new Uint8Array(src.length);
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        let active = 0;
-        let total = 0;
-        for (let ny = y - 1; ny <= y + 1; ny += 1) {
-          if (ny < 0 || ny >= height) continue;
-          for (let nx = x - 1; nx <= x + 1; nx += 1) {
-            if (nx < 0 || nx >= width) continue;
-            total += 1;
-            if (src[ny * width + nx]) active += 1;
-          }
-        }
-        out[y * width + x] = mode === "dilate" ? (active > 0 ? 1 : 0) : (active >= total ? 1 : 0);
-      }
-    }
-    return out;
-  }
-
-  return morph(morph(mask, "dilate"), "erode");
-}
-
-function createAutoMask(pixels, sensitivity) {
-  const { width, height, candidates } = createCandidatesMap(pixels, sensitivity);
-  const visited = new Uint8Array(width * height);
-  const queue = new Int32Array(width * height);
-  const components = [];
-
-  for (let i = 0; i < candidates.length; i += 1) {
-    if (!candidates[i] || visited[i]) continue;
-
-    let head = 0;
-    let tail = 0;
-    let area = 0;
-    let ySum = 0;
-    let xSum = 0;
-    const indices = [];
-
-    queue[tail++] = i;
-    visited[i] = 1;
-
-    while (head < tail) {
-      const cur = queue[head++];
-      indices.push(cur);
-      area += 1;
-      ySum += Math.floor(cur / width);
-      const x = cur % width;
-      xSum += x;
-
-      if (x > 0) {
-        const n = cur - 1;
-        if (candidates[n] && !visited[n]) {
-          visited[n] = 1;
-          queue[tail++] = n;
-        }
-      }
-
-      if (x < width - 1) {
-        const n = cur + 1;
-        if (candidates[n] && !visited[n]) {
-          visited[n] = 1;
-          queue[tail++] = n;
-        }
-      }
-
-      if (cur - width >= 0) {
-        const n = cur - width;
-        if (candidates[n] && !visited[n]) {
-          visited[n] = 1;
-          queue[tail++] = n;
-        }
-      }
-
-      if (cur + width < candidates.length) {
-        const n = cur + width;
-        if (candidates[n] && !visited[n]) {
-          visited[n] = 1;
-          queue[tail++] = n;
-        }
-      }
-    }
-
-    if (area < Math.max(300, Math.floor(candidates.length * 0.004))) continue;
-
-    const xNorm = (xSum / area) / width;
-    const yNorm = (ySum / area) / height;
-
-    if (yNorm > 0.78 && area < Math.floor(candidates.length * 0.35)) {
-      continue;
-    }
-
-    const verticalBias = clamp(1.4 - yNorm, 0.25, 1.4);
-    const centerBias = clamp(1.15 - Math.abs(xNorm - 0.5) * 1.6, 0.45, 1.15);
-    const score = area * verticalBias * centerBias;
-    components.push({ indices, score, area, yNorm });
-  }
-
-  if (!components.length) {
-    const seeds = [
-      [Math.floor(width * 0.5), Math.floor(height * 0.2)],
-      [Math.floor(width * 0.33), Math.floor(height * 0.25)],
-      [Math.floor(width * 0.66), Math.floor(height * 0.25)]
-    ];
-    return smoothMask(growRegion(candidates, width, height, seeds), width, height);
-  }
-
-  components.sort((a, b) => b.score - a.score);
-  const best = components[0];
-  const selected = [best];
-
-  for (let i = 1; i < components.length && selected.length < 3; i += 1) {
-    const candidate = components[i];
-    if (candidate.score < best.score * 0.42) continue;
-    if (candidate.area < best.area * 0.08) continue;
-    if (candidate.yNorm > 0.72) continue;
-    selected.push(candidate);
-  }
-
-  const mask = new Uint8Array(width * height);
-  selected.forEach((component) => {
-    component.indices.forEach((idx) => {
-      mask[idx] = 1;
-    });
-  });
-
-  for (let y = Math.floor(height * 0.84); y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      mask[y * width + x] = 0;
-    }
-  }
-
-  return smoothMask(mask, width, height);
-}
-
-function createSeedMask(pixels, sensitivity, seed) {
-  const { width, height, candidates, texture } = createCandidatesMap(pixels, sensitivity);
-  const sx = clamp(Math.round(seed.x), 0, width - 1);
-  const sy = clamp(Math.round(seed.y), 0, height - 1);
-  const resolvedSeed = findNearestCandidate(candidates, width, height, sx, sy);
-  if (!resolvedSeed) return createAutoMask(pixels, sensitivity);
-
-  const resolvedIdx = resolvedSeed.y * width + resolvedSeed.x;
-  if (resolvedSeed.y > height * 0.72 && texture[resolvedIdx] > clamp(12 + sensitivity * 0.55, 16, 42)) {
-    return createAutoMask(pixels, sensitivity);
-  }
-
-  const mask = growRegionWithColorConstraint(
-    pixels,
-    candidates,
-    width,
-    height,
-    resolvedSeed,
-    sensitivity
-  );
-  return smoothMask(mask, width, height);
-}
-
-function averageColorSample(pixels) {
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let count = 0;
-
-  for (let y = 0; y < pixels.height; y += 24) {
-    for (let x = 0; x < pixels.width; x += 24) {
-      const i = (y * pixels.width + x) * 4;
-      r += pixels.data[i];
-      g += pixels.data[i + 1];
-      b += pixels.data[i + 2];
-      count += 1;
-    }
-  }
-
-  return {
-    r: Math.round(r / count),
-    g: Math.round(g / count),
-    b: Math.round(b / count)
-  };
-}
-
-function buildSuggestions(base) {
-  const catalog = SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES;
-  return catalog
-    .map((s) => {
-      const rgb = hexToRgb(s.hex);
-      return {
-        ...s,
-        d: Math.sqrt((base.r - rgb.r) ** 2 + (base.g - rgb.g) ** 2 + (base.b - rgb.b) ** 2)
-      };
-    })
-    .sort((a, b) => a.d - b.d)
-    .slice(0, 6);
 }
 
 function createZone(label, shadeHex) {
@@ -970,46 +559,6 @@ function setControlsEnabled(enabled) {
   });
   // Leads inbox is always available (even with no current preview)
   if (leadsBtn) leadsBtn.disabled = false;
-}
-
-function toAlphaMask(binaryMask) {
-  const alphaMask = new Uint8Array(binaryMask.length);
-  for (let i = 0; i < binaryMask.length; i += 1) {
-    alphaMask[i] = binaryMask[i] ? 255 : 0;
-  }
-  return alphaMask;
-}
-
-function createFeatheredAlphaMask(binaryMask, width, height, featherRadius) {
-  if (featherRadius <= 0) return toAlphaMask(binaryMask);
-
-  const alphaMask = new Uint8Array(binaryMask.length);
-  const radius = Math.max(1, featherRadius);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const idx = y * width + x;
-      if (!binaryMask[idx]) {
-        alphaMask[idx] = 0;
-        continue;
-      }
-
-      let active = 0;
-      let total = 0;
-      for (let ny = y - radius; ny <= y + radius; ny += 1) {
-        if (ny < 0 || ny >= height) continue;
-        for (let nx = x - radius; nx <= x + radius; nx += 1) {
-          if (nx < 0 || nx >= width) continue;
-          total += 1;
-          if (binaryMask[ny * width + nx]) active += 1;
-        }
-      }
-
-      alphaMask[idx] = Math.round((active / total) * 255);
-    }
-  }
-
-  return alphaMask;
 }
 
 function renderZoneTabs() {
@@ -1167,37 +716,6 @@ function adoptCurrentMaskForManualEditing(zone, pixels, sensitivity) {
   zone.manualEnabled = true;
   zone.seed = null;
   invalidateZoneAuto(zone);
-}
-
-function applyTint(data, width, height, alphaMask, shadeRgb, opacity, useNatural) {
-  const blend = opacity / 100;
-  const target = useNatural ? rgbToHsl(shadeRgb.r, shadeRgb.g, shadeRgb.b) : null;
-
-  for (let p = 0, i = 0; p < width * height; p += 1, i += 4) {
-    const localAlpha = alphaMask[p] / 255;
-    if (localAlpha <= 0) continue;
-    const localBlend = blend * localAlpha;
-
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-
-    if (useNatural) {
-      const src = rgbToHsl(r, g, b);
-      const mapped = hslToRgb(
-        target.h,
-        clamp(src.s * 0.35 + target.s * 0.65, 0, 1),
-        clamp(src.l * 0.9 + target.l * 0.1, 0, 1)
-      );
-      data[i] = Math.round(r * (1 - localBlend) + mapped.r * localBlend);
-      data[i + 1] = Math.round(g * (1 - localBlend) + mapped.g * localBlend);
-      data[i + 2] = Math.round(b * (1 - localBlend) + mapped.b * localBlend);
-    } else {
-      data[i] = Math.round(r * (1 - localBlend) + shadeRgb.r * localBlend);
-      data[i + 1] = Math.round(g * (1 - localBlend) + shadeRgb.g * localBlend);
-      data[i + 2] = Math.round(b * (1 - localBlend) + shadeRgb.b * localBlend);
-    }
-  }
 }
 
 function renderTinted(pixels, compareHex = null) {
@@ -1514,7 +1032,7 @@ function initializeShadesFromImage() {
   const pixels = previewCtx.getImageData(fit.dx, fit.dy, fit.drawWidth, fit.drawHeight);
   const dominant = averageColorSample(pixels);
 
-  state.shades = buildSuggestions(dominant);
+  state.shades = buildSuggestions(dominant, SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES);
   state.activeShade = state.shades[0];
   state.compareShade = state.shades[1] || state.shades[0];
 
@@ -1710,6 +1228,7 @@ function openContactModal() {
 
   contactModal.classList.remove("hidden");
   trackContactOpened(); // Phase 3
+  populateLeadCrmFields();
   setTimeout(() => leadNameInput.focus(), 0);
 }
 
@@ -1734,15 +1253,20 @@ function captureLeadFromForm(e) {
   // snapshot from the modal canvas (already rendered)
   const snapDataUrl = leadSnapshotCanvas.toDataURL("image/png");
 
+  const costEstimate = getCurrentCostEstimate();
+
   const lead = {
-    id: "lead_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+    id: generateLeadId(),
     ts: Date.now(),
     name,
     phone,
     email: (leadEmailInput.value || "").trim(),
     notes: (leadNotesInput.value || "").trim(),
     shades,
-    snapshot: snapDataUrl
+    snapshot: snapDataUrl,
+    costEstimate: costEstimate || null,
+    customerId: leadCustomerSelect?.value || null,
+    siteId: leadSiteSelect?.value || null,
   };
 
   leads.unshift(lead); // newest first
@@ -1848,9 +1372,43 @@ function openLeadDetail(leadId) {
   });
 
   html += `</div></div>`;
+
+  if (getApiToken()) {
+    html += `
+      <div style="margin-top:14px;">
+        <button type="button" id="viewCustomerFromLeadBtn" class="button ghost tiny">View customer profile →</button>
+      </div>
+    `;
+  }
+
   leadDetailBody.innerHTML = html;
 
+  const viewCustomerBtn = document.getElementById("viewCustomerFromLeadBtn");
+  if (viewCustomerBtn) {
+    viewCustomerBtn.addEventListener("click", () => openCustomerFromLead(lead));
+  }
+
   leadDetailModal.classList.remove("hidden");
+}
+
+async function openCustomerFromLead(lead) {
+  if (!getApiToken()) return;
+  let customerId = lead.customerId;
+
+  // Fallback: locally captured lead not yet linked — match by phone on the server
+  if (!customerId && lead.phone) {
+    const { data } = await apiRequest("GET", `/api/customers?q=${encodeURIComponent(lead.phone)}`);
+    const match = (data?.customers || []).find((c) => c.phone === lead.phone);
+    customerId = match?.id || null;
+  }
+
+  if (!customerId) {
+    showTransientToast("No linked customer yet. Sync this lead first.");
+    return;
+  }
+
+  closeLeadDetail();
+  openCustomerDetail(customerId);
 }
 
 function closeLeadDetail() {
@@ -1896,9 +1454,13 @@ function exportCurrentLeadPackage() {
   URL.revokeObjectURL(url);
 }
 
-function clearAllLeads() {
+async function clearAllLeads() {
   if (!leads.length) return;
-  if (!confirm("Clear all locally stored leads? This cannot be undone.")) return;
+  if (!confirm("Clear all leads on this device? Synced server leads will also be deleted.")) return;
+  const toDelete = [...leads];
+  if (getApiToken()) {
+    await Promise.all(toDelete.map((l) => deleteLeadFromServer(l.id)));
+  }
   leads = [];
   saveLeads();
   renderLeadsList();
@@ -2052,73 +1614,106 @@ function clearSession() {
 
 /* ===================== Phase 4: Backend API Sync ===================== */
 
-// API_BASE is empty so all paths are relative — works whether the app is
-// opened directly as a file (offline, no sync) or served by the Express server.
-const API_BASE = "";
-
-function getApiToken() {
-  try { return localStorage.getItem(API_TOKEN_KEY) || null; } catch { return null; }
-}
-function setApiToken(t) {
-  try { localStorage.setItem(API_TOKEN_KEY, t); } catch { /* storage full */ }
-}
+// Clears the server session locally (tokens live in ./src/api.js) and wipes
+// any cached CRM data so nothing leaks across sign-ins.
 function clearApiToken() {
-  try { localStorage.removeItem(API_TOKEN_KEY); localStorage.removeItem(API_TENANT_KEY); } catch { /* nothing */ }
+  clearTokens();
+  try {
+    localStorage.removeItem(CUSTOMERS_CACHE_KEY);
+  } catch { /* nothing */ }
   apiTenant = null;
+  crmCustomers = [];
 }
 
-async function apiRequest(method, path, body) {
-  try {
-    const token = getApiToken();
-    const headers = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(API_BASE + path, {
-      method,
-      headers,
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { data: null, error: data.error || `HTTP ${res.status}` };
-    return { data, error: null };
-  } catch (err) {
-    return { data: null, error: err.message || "Network error" };
-  }
+// The app is gated behind sign-in, so send unauthenticated users to the login
+// page (preserving where they were headed) instead of leaving them on a
+// signed-out home screen.
+function redirectToLogin() {
+  const dest = location.pathname + location.search + location.hash;
+  location.replace("/login?redirect=" + encodeURIComponent(dest));
 }
+
+// When a session can no longer be refreshed, reset state and return to login.
+setUnauthorizedHandler(() => {
+  apiTenant = null;
+  crmCustomers = [];
+  try { localStorage.removeItem(CUSTOMERS_CACHE_KEY); } catch { /* nothing */ }
+  if (typeof updateServerSyncUI === "function") updateServerSyncUI();
+  redirectToLogin();
+});
 
 // Called at startup — tries to validate stored token + load tenant info
 async function loadApiSession() {
   const token = getApiToken();
-  if (!token) return;
+  if (!token) {
+    // Guests explicitly opted into offline use; everyone else gets sent to login.
+    if (!isGuestMode()) redirectToLogin();
+    return;
+  }
   const { data, error } = await apiRequest("GET", "/api/auth/me");
-  if (error || !data?.tenant) { clearApiToken(); updateServerSyncUI(); return; }
+  if (error || !data?.tenant) {
+    // A genuine 401 is already handled by the unauthorized handler in
+    // ./src/api.js (tokens cleared + redirect to /login). Other failures
+    // (offline / server error) are transient — keep the session so a brief
+    // hiccup doesn't sign the user out.
+    updateServerSyncUI();
+    return;
+  }
   apiTenant = data.tenant;
   updateServerSyncUI();
-  await syncLeadsFromServer();
+  await completeServerSessionRestore();
 }
 
 async function loginToServer(email, password) {
   const { data, error } = await apiRequest("POST", "/api/auth/login", { email, password });
   if (error) return { ok: false, error };
-  setApiToken(data.token);
+  setSession(data);
+  exitGuestMode();
   apiTenant = data.tenant;
   updateServerSyncUI();
-  await syncLeadsFromServer();
+  await completeServerSessionRestore();
   return { ok: true };
 }
 
 async function registerOnServer(shopName, dealerName, phone, email, password) {
   const { data, error } = await apiRequest("POST", "/api/auth/register", { shopName, dealerName, phone, email, password });
   if (error) return { ok: false, error };
-  setApiToken(data.token);
+  setSession(data);
+  exitGuestMode();
   apiTenant = data.tenant;
   updateServerSyncUI();
+  await completeServerSessionRestore();
   return { ok: true };
 }
 
-function logoutFromServer() {
+async function completeServerSessionRestore() {
+  await syncDealerFromServer();
+  await syncLeadsFromServer();
+  await loadShadeCatalog();
+}
+
+async function syncDealerFromServer() {
+  if (!getApiToken()) return;
+  const { data, error } = await apiRequest("GET", "/api/dealer");
+  if (error || !data?.dealer) return;
+  const d = data.dealer;
+  saveDealerSettings({
+    shopName: d.shopName || "",
+    dealerName: d.dealerName || "",
+    phone: d.phone || "",
+  });
+}
+
+async function logoutFromServer() {
+  // Best-effort server-side revocation of this session's refresh token.
+  const refreshToken = getRefreshToken();
+  if (refreshToken) {
+    await apiRequest("POST", "/api/auth/logout", { refreshToken });
+  }
   clearApiToken();
   updateServerSyncUI();
   showTransientToast("Signed out from server.");
+  redirectToLogin();
 }
 
 // Sync a single lead to the server (fire-and-forget; local state is source of truth)
@@ -2132,6 +1727,10 @@ async function syncLeadToServer(lead) {
     notes: lead.notes || "",
     shades: lead.shades || [],
     snapshotB64: lead.snapshot || "",
+    costEstimate: lead.costEstimate || null,
+    customerId: lead.customerId || null,
+    siteId: lead.siteId || null,
+    pilotSessionId: pilotSessionId || null,
     createdAt: new Date(lead.ts).toISOString(),
   });
 }
@@ -2140,6 +1739,12 @@ async function syncLeadToServer(lead) {
 async function deleteLeadFromServer(leadId) {
   if (!getApiToken()) return;
   await apiRequest("DELETE", `/api/leads/${leadId}`);
+}
+
+async function fetchLeadSnapshotFromServer(leadId) {
+  const { data, error } = await apiRequest("GET", `/api/leads/${leadId}`);
+  if (error || !data?.lead) return "";
+  return data.lead.snapshotB64 || "";
 }
 
 // Fetch server leads and merge with local (server wins on conflict by ts)
@@ -2156,17 +1761,35 @@ async function syncLeadsFromServer() {
     email: l.email || "",
     notes: l.notes || "",
     shades: l.shades || [],
-    snapshot: "",  // snapshot not included in list endpoint
+    costEstimate: l.costEstimate || null,
+    customerId: l.customerId || null,
+    siteId: l.siteId || null,
+    snapshot: "",
   }));
 
-  // Merge: keep local lead if it has a snapshot, otherwise take server version
   const localById = new Map(leads.map((l) => [l.id, l]));
   for (const sl of serverLeads) {
     const existing = localById.get(sl.id);
-    if (!existing) localById.set(sl.id, sl);
-    // if exists locally with snapshot, keep local (it has richer data)
+    if (!existing) {
+      sl.snapshot = await fetchLeadSnapshotFromServer(sl.id);
+      localById.set(sl.id, sl);
+      continue;
+    }
+    if (!existing.snapshot) {
+      existing.snapshot = await fetchLeadSnapshotFromServer(sl.id);
+    }
+    if (sl.ts > existing.ts) {
+      existing.name = sl.name;
+      existing.phone = sl.phone;
+      existing.email = sl.email;
+      existing.notes = sl.notes;
+      existing.shades = sl.shades.length ? sl.shades : existing.shades;
+      existing.costEstimate = sl.costEstimate || existing.costEstimate;
+      existing.ts = sl.ts;
+    }
+    localById.set(sl.id, existing);
   }
-  // Also push any local leads to server that the server doesn't know about
+
   const serverIds = new Set(serverLeads.map((l) => l.id));
   for (const local of leads) {
     if (!serverIds.has(local.id)) syncLeadToServer(local);
@@ -2257,11 +1880,1275 @@ async function handleServerAuthSubmit(mode) {
   closeSettingsModal();
 }
 
-/* ===================== Phase 3: Pilot Validation Analytics ===================== */
+/* ===================== Phase 5: CRM Lite ===================== */
 
-function generateEventId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+async function syncPreviewSessionToServer(sessionType, extra = {}) {
+  if (!getApiToken() || !pilotSessionId) return;
+  await apiRequest("POST", "/api/sessions", {
+    pilotSessionId,
+    sessionType,
+    summary: extra.summary || "",
+    shades: extra.shades || [],
+    name: dealerSettings.dealerName || "",
+    phone: dealerSettings.phone || "",
+  }).catch(() => { /* best-effort */ });
 }
+
+function saveCustomersCache(list) {
+  try { safeLsSet(CUSTOMERS_CACHE_KEY, JSON.stringify(list || [])); } catch { /* storage full */ }
+}
+
+function loadCustomersCache() {
+  try {
+    const raw = localStorage.getItem(CUSTOMERS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasCustomersCache() {
+  return loadCustomersCache().length > 0;
+}
+
+// Fetch customers from server; falls back to (and refreshes) the local cache.
+async function fetchCustomers(q = "") {
+  if (!getApiToken()) {
+    const cached = loadCustomersCache();
+    return filterCustomersLocally(cached, q);
+  }
+  const path = q ? `/api/customers?q=${encodeURIComponent(q)}` : "/api/customers";
+  const { data, error } = await apiRequest("GET", path);
+  if (error || !data?.customers) {
+    // Offline / server error — serve from cache so CRM stays usable
+    return filterCustomersLocally(loadCustomersCache(), q);
+  }
+  crmCustomers = data.customers;
+  if (!q) saveCustomersCache(crmCustomers); // only cache the full list
+  return crmCustomers;
+}
+
+function filterCustomersLocally(list, q) {
+  const needle = (q || "").trim().toLowerCase();
+  if (!needle) return list;
+  return list.filter((c) =>
+    [c.name, c.phone, c.email].some((v) => (v || "").toLowerCase().includes(needle))
+  );
+}
+
+async function populateLeadCrmFields() {
+  const signedIn = !!getApiToken();
+  if (leadCustomerField) leadCustomerField.classList.toggle("hidden", !signedIn);
+  if (leadSiteField) leadSiteField.classList.toggle("hidden", !signedIn);
+  if (!signedIn || !leadCustomerSelect) return;
+
+  const customers = await fetchCustomers();
+  leadCustomerSelect.innerHTML = `<option value="">New customer (auto-create from phone)</option>`;
+  customers.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = `${c.name} — ${c.phone}`;
+    leadCustomerSelect.appendChild(opt);
+  });
+  if (leadSiteSelect) {
+    leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
+  }
+}
+
+async function populateLeadSites(customerId) {
+  if (!leadSiteSelect || !customerId) {
+    if (leadSiteSelect) leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
+    return;
+  }
+  const { data, error } = await apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`);
+  leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
+  if (error || !data?.sites) return;
+  data.sites.forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = s.name;
+    leadSiteSelect.appendChild(opt);
+  });
+}
+
+function openCustomersModal() {
+  if (!customersModal) return;
+  const signedIn = !!getApiToken();
+  const showPanel = signedIn || hasCustomersCache();
+  if (customersSignInPrompt) customersSignInPrompt.style.display = showPanel ? "none" : "block";
+  if (customersPanel) customersPanel.style.display = showPanel ? "block" : "none";
+  // + New requires a live connection (writes go to server)
+  if (newCustomerBtn) newCustomerBtn.style.display = signedIn ? "" : "none";
+  customersModal.classList.remove("hidden");
+  if (showPanel) renderCustomersList();
+}
+
+function closeCustomersModal() {
+  if (customersModal) customersModal.classList.add("hidden");
+}
+
+async function renderCustomersList(q = "") {
+  if (!customersListEl) return;
+  customersListEl.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  const customers = await fetchCustomers(q);
+  customersListEl.innerHTML = "";
+  if (!customers.length) {
+    customersListEl.innerHTML = `<p class="muted" style="padding:12px;">No customers yet. Save a lead or tap + New.</p>`;
+    return;
+  }
+  customers.forEach((c) => {
+    const card = document.createElement("div");
+    card.className = "customer-card";
+    card.innerHTML = `
+      <div>
+        <div class="name">${c.name}</div>
+        <div class="phone">${c.phone}</div>
+      </div>
+      <div class="stats">${c.leadCount || 0} leads<br>${c.siteCount || 0} sites</div>
+    `;
+    card.addEventListener("click", () => {
+      closeCustomersModal();
+      openCustomerDetail(c.id);
+    });
+    customersListEl.appendChild(card);
+  });
+}
+
+async function openCustomerDetail(customerId) {
+  if (!customerDetailModal || !customerDetailBody) return;
+  currentCustomerId = customerId;
+  customerDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  customerDetailModal.classList.remove("hidden");
+
+  const online = !!getApiToken();
+  const canManage = online;
+  if (deleteCustomerBtn) deleteCustomerBtn.style.display = canManage ? "" : "none";
+  if (editCustomerBtn) editCustomerBtn.style.display = canManage ? "" : "none";
+  if (addSiteBtn) addSiteBtn.style.display = canManage ? "" : "none";
+
+  // Offline: render from the cached list only
+  if (!online) {
+    const cached = loadCustomersCache().find((c) => c.id === customerId);
+    if (!cached) {
+      customerDetailBody.innerHTML = `<p class="muted">Sign in to view this customer's full profile.</p>`;
+      return;
+    }
+    renderCustomerDetail(cached, [], [], { offline: true });
+    return;
+  }
+
+  const [customerRes, sitesRes, timelineRes] = await Promise.all([
+    apiRequest("GET", `/api/customers/${customerId}`),
+    apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`),
+    apiRequest("GET", `/api/customers/${customerId}/timeline`),
+  ]);
+
+  const customer = customerRes.data?.customer;
+  const sites = sitesRes.data?.sites || [];
+  const timeline = timelineRes.data?.timeline || [];
+  if (!customer) {
+    customerDetailBody.innerHTML = `<p class="muted">Customer not found.</p>`;
+    return;
+  }
+
+  renderCustomerDetail(customer, sites, timeline, { offline: false });
+}
+
+function renderCustomerDetail(customer, sites, timeline, { offline }) {
+  currentCustomerObj = customer;
+  const typeLabel = customer.customerType === "contractor" ? "Contractor" : "End customer";
+  let html = `
+    <div class="info">
+      <div class="info-row"><span class="label">Name</span><strong>${customer.name}</strong></div>
+      <div class="info-row"><span class="label">Phone</span><strong>${customer.phone}</strong></div>
+      ${customer.email ? `<div class="info-row"><span class="label">Email</span>${customer.email}</div>` : ""}
+      <div class="info-row"><span class="label">Type</span>${typeLabel}</div>
+      ${customer.notes ? `<div class="info-row"><span class="label">Notes</span>${customer.notes}</div>` : ""}
+    </div>
+    <h4 style="margin:16px 0 8px;font-size:0.82rem;color:var(--muted);text-transform:uppercase;">Sites / Projects</h4>
+    <div class="sites-list">
+      ${sites.length ? sites.map((s) => `<span class="site-chip">${s.name}</span>`).join("") : `<span class="muted tiny">No sites yet</span>`}
+    </div>
+    <h4 style="margin:16px 0 8px;font-size:0.82rem;color:var(--muted);text-transform:uppercase;">Timeline</h4>
+    <div class="timeline-list">
+  `;
+
+  if (offline) {
+    html += `<p class="muted tiny">Showing cached profile. Sign in to load sites and full timeline.</p>`;
+  } else if (!timeline.length) {
+    html += `<p class="muted tiny">No activity yet.</p>`;
+  } else {
+    timeline.forEach((item) => {
+      const when = new Date(item.ts).toLocaleString();
+      const kind = (item.kind || "").replace(/_/g, " ");
+      html += `
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div>
+            <div class="kind">${kind}</div>
+            <div><strong>${item.title || "Activity"}</strong></div>
+            <div class="when">${when}${item.siteName ? ` · ${item.siteName}` : ""}</div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  html += `</div>`;
+  customerDetailBody.innerHTML = html;
+  const titleEl = document.getElementById("customerDetailTitle");
+  if (titleEl) titleEl.textContent = customer.name;
+}
+
+function closeCustomerDetail() {
+  if (customerDetailModal) customerDetailModal.classList.add("hidden");
+  currentCustomerId = null;
+}
+
+function openNewCustomerModal(customer = null) {
+  if (!newCustomerModal) return;
+  editingCustomerId = customer?.id || null;
+  if (newCustomerTitle) newCustomerTitle.textContent = customer ? "Edit Customer" : "New Customer";
+  if (saveCustomerBtn) saveCustomerBtn.textContent = customer ? "Update Customer" : "Save Customer";
+
+  const nameEl = document.getElementById("newCustomerName");
+  const phoneEl = document.getElementById("newCustomerPhone");
+  const emailEl = document.getElementById("newCustomerEmail");
+  const typeEl = document.getElementById("newCustomerType");
+  const notesEl = document.getElementById("newCustomerNotes");
+  if (nameEl) nameEl.value = customer?.name || "";
+  if (phoneEl) phoneEl.value = customer?.phone || "";
+  if (emailEl) emailEl.value = customer?.email || "";
+  if (typeEl) typeEl.value = customer?.customerType || "end_customer";
+  if (notesEl) notesEl.value = customer?.notes || "";
+
+  newCustomerModal.classList.remove("hidden");
+}
+
+function closeNewCustomerModal() {
+  if (newCustomerModal) newCustomerModal.classList.add("hidden");
+  if (newCustomerForm) newCustomerForm.reset();
+  editingCustomerId = null;
+}
+
+async function handleNewCustomerSubmit(e) {
+  e.preventDefault();
+  const name = (document.getElementById("newCustomerName")?.value || "").trim();
+  const phone = (document.getElementById("newCustomerPhone")?.value || "").trim();
+  const email = (document.getElementById("newCustomerEmail")?.value || "").trim();
+  const customerType = document.getElementById("newCustomerType")?.value || "end_customer";
+  const notes = (document.getElementById("newCustomerNotes")?.value || "").trim();
+  if (!name || !phone) return;
+
+  const payload = { name, phone, email, notes, customerType };
+  const { error } = editingCustomerId
+    ? await apiRequest("PUT", `/api/customers/${editingCustomerId}`, payload)
+    : await apiRequest("POST", "/api/customers", payload);
+
+  if (error) {
+    showTransientToast(error);
+    return;
+  }
+
+  const wasEditing = editingCustomerId;
+  closeNewCustomerModal();
+  showTransientToast(`Customer ${name} ${wasEditing ? "updated" : "saved"}.`);
+  await fetchCustomers(); // refresh cache
+  if (wasEditing && currentCustomerId === wasEditing) {
+    openCustomerDetail(wasEditing);
+  } else {
+    renderCustomersList(customerSearchInput?.value || "");
+  }
+}
+
+function editCurrentCustomer() {
+  if (currentCustomerObj) openNewCustomerModal(currentCustomerObj);
+}
+
+async function deleteCurrentCustomer() {
+  if (!currentCustomerId) return;
+  const name = currentCustomerObj?.name || "this customer";
+  if (!confirm(`Delete ${name}? Their sites and timeline links will be removed. Captured leads are kept.`)) return;
+
+  const { error } = await apiRequest("DELETE", `/api/customers/${currentCustomerId}`);
+  if (error) {
+    showTransientToast(error);
+    return;
+  }
+  showTransientToast("Customer deleted.");
+  closeCustomerDetail();
+  await fetchCustomers();
+  openCustomersModal();
+}
+
+function openSiteModal() {
+  if (!siteModal || !currentCustomerId) return;
+  if (siteForm) siteForm.reset();
+  siteModal.classList.remove("hidden");
+  setTimeout(() => document.getElementById("siteName")?.focus(), 0);
+}
+
+function closeSiteModal() {
+  if (siteModal) siteModal.classList.add("hidden");
+}
+
+async function handleSiteSubmit(e) {
+  e.preventDefault();
+  if (!currentCustomerId) return;
+  const name = (document.getElementById("siteName")?.value || "").trim();
+  const address = (document.getElementById("siteAddress")?.value || "").trim();
+  const status = document.getElementById("siteStatus")?.value || "active";
+  const notes = (document.getElementById("siteNotes")?.value || "").trim();
+  if (!name) return;
+
+  const { error } = await apiRequest("POST", "/api/sites", {
+    customerId: currentCustomerId,
+    name,
+    address,
+    status,
+    notes,
+  });
+  if (error) {
+    showTransientToast(error);
+    return;
+  }
+  closeSiteModal();
+  showTransientToast("Site added.");
+  openCustomerDetail(currentCustomerId);
+}
+
+/* ===================== Phase 6: Quotes & Orders ===================== */
+
+const QUOTE_STATUS_LABELS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected", converted: "Converted" };
+const ORDER_STATUS_LABELS = { pending: "Pending", confirmed: "Confirmed", fulfilled: "Fulfilled", cancelled: "Cancelled" };
+const QUOTE_ALL_STATUSES = ["draft", "sent", "accepted", "rejected", "converted"];
+const CLIENT_QUOTE_STATUSES = ["draft", "sent", "accepted", "rejected"];
+const ORDER_STATUSES = ["pending", "confirmed", "fulfilled", "cancelled"];
+
+function blankItem() {
+  return { description: "", brand: "", quantity: 1, unitPrice: 0, unit: "litre", shadeId: "" };
+}
+
+function openQuotesModal() {
+  if (!quotesModal) return;
+  const signedIn = !!getApiToken();
+  if (quotesSignInPrompt) quotesSignInPrompt.style.display = signedIn ? "none" : "block";
+  if (quotesPanel) quotesPanel.style.display = signedIn ? "block" : "none";
+  quotesModal.classList.remove("hidden");
+  if (signedIn) switchCommerceTab(commerceTab);
+}
+
+function closeQuotesModal() {
+  if (quotesModal) quotesModal.classList.add("hidden");
+}
+
+function switchCommerceTab(tab) {
+  commerceTab = tab;
+  if (quotesTabBtn) quotesTabBtn.classList.toggle("active", tab === "quotes");
+  if (ordersTabBtn) ordersTabBtn.classList.toggle("active", tab === "orders");
+  if (newQuoteBtn) newQuoteBtn.style.display = tab === "quotes" ? "" : "none";
+  buildStatusFilter();
+  renderDocList();
+}
+
+function buildStatusFilter() {
+  if (!docStatusFilter) return;
+  const statuses = commerceTab === "quotes" ? QUOTE_ALL_STATUSES : ORDER_STATUSES;
+  const labels = commerceTab === "quotes" ? QUOTE_STATUS_LABELS : ORDER_STATUS_LABELS;
+  docStatusFilter.innerHTML =
+    `<option value="">All statuses</option>` +
+    statuses.map((s) => `<option value="${s}">${labels[s]}</option>`).join("");
+}
+
+async function renderDocList() {
+  if (!docList) return;
+  docList.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  const status = docStatusFilter?.value || "";
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+
+  if (commerceTab === "quotes") {
+    const { data, error } = await apiRequest("GET", `/api/quotes${qs}`);
+    if (error) { docList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
+    const quotes = data?.quotes || [];
+    if (!quotes.length) {
+      docList.innerHTML = `<p class="muted" style="padding:12px;">No quotes yet. Tap + New Quote.</p>`;
+      return;
+    }
+    docList.innerHTML = "";
+    quotes.forEach((q) => docList.appendChild(docCard({
+      number: q.quoteNumber,
+      sub: `${escHtml(q.customerName || "—")}${q.siteName ? " · " + escHtml(q.siteName) : ""} · ${q.itemCount || 0} items`,
+      total: q.total,
+      status: q.status,
+      labels: QUOTE_STATUS_LABELS,
+      onClick: () => openDocDetail("quote", q.id),
+    })));
+  } else {
+    const { data, error } = await apiRequest("GET", `/api/orders${qs}`);
+    if (error) { docList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
+    const orders = data?.orders || [];
+    if (!orders.length) {
+      docList.innerHTML = `<p class="muted" style="padding:12px;">No orders yet. Convert an accepted quote to create one.</p>`;
+      return;
+    }
+    docList.innerHTML = "";
+    orders.forEach((o) => docList.appendChild(docCard({
+      number: o.orderNumber,
+      sub: `${escHtml(o.customerName || "—")}${o.quoteNumber ? " · from " + escHtml(o.quoteNumber) : ""} · ${o.itemCount || 0} items`,
+      total: o.total,
+      status: o.status,
+      labels: ORDER_STATUS_LABELS,
+      onClick: () => openDocDetail("order", o.id),
+    })));
+  }
+}
+
+function docCard({ number, sub, total, status, labels, onClick }) {
+  const card = document.createElement("div");
+  card.className = "doc-card";
+  card.innerHTML = `
+    <div>
+      <div class="doc-number">${escHtml(number)}</div>
+      <div class="doc-sub">${sub}</div>
+    </div>
+    <div class="doc-right">
+      <div class="doc-total">${fmtMoney(total)}</div>
+      ${statusBadge(status, labels)}
+    </div>`;
+  card.addEventListener("click", onClick);
+  return card;
+}
+
+async function openQuoteForm(quote = null) {
+  if (!quoteFormModal) return;
+  editingQuoteId = quote?.id || null;
+  if (quoteFormTitle) quoteFormTitle.textContent = quote ? `Edit ${quote.quoteNumber}` : "New Quote";
+  if (saveQuoteBtn) saveQuoteBtn.textContent = quote ? "Update Quote" : "Save Quote";
+  if (quoteFormError) quoteFormError.textContent = "";
+
+  populateShadePicker();
+  await populateQuoteCustomers(quote?.customerId);
+  await populateQuoteSites(quote?.customerId, quote?.siteId);
+
+  if (quoteDiscount) quoteDiscount.value = quote?.discount ?? 0;
+  if (quoteTaxRate) quoteTaxRate.value = quote?.taxRate ?? 0;
+  if (quoteNotes) quoteNotes.value = quote?.notes || "";
+
+  quoteItemsList.innerHTML = "";
+  const items = quote?.items?.length ? quote.items : [blankItem()];
+  items.forEach(addQuoteItemRow);
+  recomputeQuoteTotals();
+  quoteFormModal.classList.remove("hidden");
+}
+
+function closeQuoteForm() {
+  if (quoteFormModal) quoteFormModal.classList.add("hidden");
+  editingQuoteId = null;
+}
+
+async function populateQuoteCustomers(selectedId) {
+  const customers = await fetchCustomers();
+  quoteCustomerSelect.innerHTML =
+    `<option value="">Select customer…</option>` +
+    customers.map((c) => `<option value="${c.id}">${escHtml(c.name)} — ${escHtml(c.phone)}</option>`).join("");
+  if (selectedId) quoteCustomerSelect.value = selectedId;
+}
+
+async function populateQuoteSites(customerId, selectedId) {
+  quoteSiteSelect.innerHTML = `<option value="">No site</option>`;
+  if (!customerId) return;
+  const { data } = await apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`);
+  (data?.sites || []).forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = s.name;
+    quoteSiteSelect.appendChild(opt);
+  });
+  if (selectedId) quoteSiteSelect.value = selectedId;
+}
+
+function populateShadePicker() {
+  if (!quoteShadePicker) return;
+  const cat = Array.isArray(SHADE_CATALOG) ? SHADE_CATALOG : [];
+  quoteShadePicker.innerHTML =
+    `<option value="">Add a shade from the catalog…</option>` +
+    cat.map((s, i) =>
+      `<option value="${i}">${escHtml(s.name)}${s.brand ? " — " + escHtml(s.brand) : ""}${s.pricePerL ? ` (₹${s.pricePerL}/L)` : ""}</option>`
+    ).join("");
+}
+
+function onShadePicked() {
+  const idx = quoteShadePicker.value;
+  if (idx === "") return;
+  const s = SHADE_CATALOG[Number(idx)];
+  if (s) {
+    const litres = Math.ceil((ROOM_SQ_M * 2) / COVERAGE_SQ_M_PER_L);
+    addQuoteItemRow({
+      description: s.brand ? `${s.name} (${s.brand})` : s.name,
+      brand: s.brand || "",
+      quantity: litres,
+      unitPrice: s.pricePerL || 0,
+      unit: "litre",
+      shadeId: s.id || "",
+    });
+    recomputeQuoteTotals();
+  }
+  quoteShadePicker.value = "";
+}
+
+function addQuoteItemRow(item) {
+  const row = document.createElement("div");
+  row.className = "quote-item-row";
+  row.dataset.shadeId = item.shadeId || "";
+  const qty = item.quantity ?? 1;
+  const price = item.unitPrice ?? 0;
+  row.innerHTML = `
+    <div class="qi-desc-wrap">
+      <input class="qi-desc" type="text" placeholder="Description" value="${escHtml(item.description)}" />
+      <input class="qi-brand" type="text" placeholder="Brand (optional)" value="${escHtml(item.brand || "")}" />
+    </div>
+    <input class="qi-qty" type="number" min="0" step="0.01" value="${qty}" />
+    <input class="qi-price" type="number" min="0" step="0.01" value="${price}" />
+    <div class="qi-line">${fmtMoney((Number(qty) || 0) * (Number(price) || 0))}</div>
+    <button type="button" class="qi-remove" title="Remove line">×</button>`;
+  row.querySelector(".qi-remove").addEventListener("click", () => {
+    row.remove();
+    ensureAtLeastOneRow();
+    recomputeQuoteTotals();
+  });
+  row.querySelectorAll("input").forEach((inp) => inp.addEventListener("input", recomputeQuoteTotals));
+  quoteItemsList.appendChild(row);
+}
+
+function ensureAtLeastOneRow() {
+  if (quoteItemsList && quoteItemsList.querySelectorAll(".quote-item-row").length === 0) {
+    addQuoteItemRow(blankItem());
+  }
+}
+
+function recomputeQuoteTotals() {
+  if (!quoteItemsList || !quoteTotals) return;
+  let subtotal = 0;
+  quoteItemsList.querySelectorAll(".quote-item-row").forEach((row) => {
+    const qty = Number(row.querySelector(".qi-qty").value) || 0;
+    const price = Number(row.querySelector(".qi-price").value) || 0;
+    const line = round2(qty * price);
+    row.querySelector(".qi-line").textContent = fmtMoney(line);
+    subtotal += line;
+  });
+  subtotal = round2(subtotal);
+  const discount = Number(quoteDiscount?.value) || 0;
+  const taxRate = Number(quoteTaxRate?.value) || 0;
+  const base = Math.max(0, round2(subtotal - discount));
+  const tax = round2((base * taxRate) / 100);
+  const total = round2(base + tax);
+  quoteTotals.innerHTML = `
+    <div class="t-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
+    <div class="t-row"><span>Discount</span><span>− ${fmtMoney(discount)}</span></div>
+    <div class="t-row"><span>Tax (${taxRate}%)</span><span>${fmtMoney(tax)}</span></div>
+    <div class="t-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>`;
+}
+
+function collectQuoteItems() {
+  return [...quoteItemsList.querySelectorAll(".quote-item-row")]
+    .map((row, i) => ({
+      shadeId: row.dataset.shadeId || "",
+      description: row.querySelector(".qi-desc").value.trim(),
+      brand: row.querySelector(".qi-brand").value.trim(),
+      quantity: Number(row.querySelector(".qi-qty").value) || 0,
+      unitPrice: Number(row.querySelector(".qi-price").value) || 0,
+      unit: "litre",
+      sortOrder: i,
+    }))
+    .filter((it) => it.description);
+}
+
+async function handleQuoteSubmit(e) {
+  e.preventDefault();
+  const customerId = quoteCustomerSelect.value;
+  if (!customerId) { quoteFormError.textContent = "Select a customer."; return; }
+  const items = collectQuoteItems();
+  if (!items.length) { quoteFormError.textContent = "Add at least one line item with a description."; return; }
+
+  const payload = {
+    customerId,
+    siteId: quoteSiteSelect.value || null,
+    discount: Number(quoteDiscount.value) || 0,
+    taxRate: Number(quoteTaxRate.value) || 0,
+    notes: quoteNotes.value.trim(),
+    items,
+  };
+
+  if (saveQuoteBtn) saveQuoteBtn.disabled = true;
+  const { error } = editingQuoteId
+    ? await apiRequest("PUT", `/api/quotes/${editingQuoteId}`, payload)
+    : await apiRequest("POST", "/api/quotes", payload);
+  if (saveQuoteBtn) saveQuoteBtn.disabled = false;
+
+  if (error) { quoteFormError.textContent = error; return; }
+  const wasEditing = editingQuoteId;
+  closeQuoteForm();
+  showTransientToast(wasEditing ? "Quote updated." : "Quote created.");
+  commerceTab = "quotes";
+  if (docStatusFilter) docStatusFilter.value = "";
+  buildStatusFilter();
+  renderDocList();
+}
+
+async function openDocDetail(type, id) {
+  if (!docDetailModal || !docDetailBody) return;
+  docDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  if (docDetailActions) docDetailActions.innerHTML = "";
+  docDetailModal.classList.remove("hidden");
+
+  const path = type === "quote" ? `/api/quotes/${id}` : `/api/orders/${id}`;
+  const { data, error } = await apiRequest("GET", path);
+  const doc = type === "quote" ? data?.quote : data?.order;
+  if (error || !doc) {
+    docDetailBody.innerHTML = `<p class="muted">${escHtml(error || "Not found.")}</p>`;
+    return;
+  }
+  currentDoc = { type, data: doc };
+  renderDocDetail(type, doc);
+}
+
+function closeDocDetail() {
+  if (docDetailModal) docDetailModal.classList.add("hidden");
+  currentDoc = null;
+}
+
+function renderDocDetail(type, doc) {
+  const isQuote = type === "quote";
+  const number = isQuote ? doc.quoteNumber : doc.orderNumber;
+  const labels = isQuote ? QUOTE_STATUS_LABELS : ORDER_STATUS_LABELS;
+  if (docDetailTitle) docDetailTitle.textContent = number;
+
+  const itemRows = (doc.items || []).map((it) => `
+    <tr>
+      <td>${escHtml(it.description)}${it.brand ? `<div class="muted tiny">${escHtml(it.brand)}</div>` : ""}</td>
+      <td>${it.quantity}</td>
+      <td>${fmtMoney(it.unitPrice)}</td>
+      <td>${fmtMoney(it.lineTotal)}</td>
+    </tr>`).join("");
+
+  docDetailBody.innerHTML = `
+    <div class="info">
+      <div class="info-row"><span class="label">Status</span>${statusBadge(doc.status, labels)}</div>
+      <div class="info-row"><span class="label">Customer</span><strong>${escHtml(doc.customerName || "—")}</strong></div>
+      ${doc.siteName ? `<div class="info-row"><span class="label">Site</span>${escHtml(doc.siteName)}</div>` : ""}
+      ${!isQuote && doc.quoteNumber ? `<div class="info-row"><span class="label">From quote</span>${escHtml(doc.quoteNumber)}</div>` : ""}
+      ${doc.notes ? `<div class="info-row"><span class="label">Notes</span>${escHtml(doc.notes)}</div>` : ""}
+    </div>
+    <table class="doc-detail-items">
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Total</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="quote-totals">
+      <div class="t-row"><span>Subtotal</span><span>${fmtMoney(doc.subtotal)}</span></div>
+      <div class="t-row"><span>Discount</span><span>− ${fmtMoney(doc.discount)}</span></div>
+      <div class="t-row"><span>Tax (${doc.taxRate}%)</span><span>${fmtMoney(doc.taxAmount)}</span></div>
+      <div class="t-row grand"><span>Total</span><span>${fmtMoney(doc.total)}</span></div>
+    </div>`;
+
+  renderDocActions(type, doc);
+}
+
+function actionBtn(label, cls, onClick) {
+  const b = document.createElement("button");
+  b.className = cls;
+  b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function renderDocActions(type, doc) {
+  if (!docDetailActions) return;
+  docDetailActions.innerHTML = "";
+
+  if (type === "quote" && doc.status !== "converted") {
+    const sel = document.createElement("select");
+    sel.className = "doc-status-select";
+    sel.innerHTML = CLIENT_QUOTE_STATUSES
+      .map((s) => `<option value="${s}" ${s === doc.status ? "selected" : ""}>${QUOTE_STATUS_LABELS[s]}</option>`)
+      .join("");
+    sel.addEventListener("change", () => updateDocStatus("quote", doc.id, sel.value));
+    docDetailActions.appendChild(sel);
+    docDetailActions.appendChild(actionBtn("Delete", "button ghost danger", () => deleteDoc("quote", doc.id)));
+    docDetailActions.appendChild(actionBtn("Edit", "button ghost", () => editQuote(doc)));
+    docDetailActions.appendChild(actionBtn("Convert to Order", "button primary", () => convertQuote(doc.id)));
+    return;
+  }
+
+  if (type === "quote") {
+    const note = document.createElement("span");
+    note.className = "muted tiny";
+    note.style.marginRight = "auto";
+    note.textContent = "Converted to an order.";
+    docDetailActions.appendChild(note);
+    docDetailActions.appendChild(actionBtn("Delete", "button ghost danger", () => deleteDoc("quote", doc.id)));
+    docDetailActions.appendChild(actionBtn("Done", "button primary", closeDocDetail));
+    return;
+  }
+
+  // order
+  const sel = document.createElement("select");
+  sel.className = "doc-status-select";
+  sel.innerHTML = ORDER_STATUSES
+    .map((s) => `<option value="${s}" ${s === doc.status ? "selected" : ""}>${ORDER_STATUS_LABELS[s]}</option>`)
+    .join("");
+  sel.addEventListener("change", () => updateDocStatus("order", doc.id, sel.value));
+  docDetailActions.appendChild(sel);
+  docDetailActions.appendChild(actionBtn("Delete", "button ghost danger", () => deleteDoc("order", doc.id)));
+  docDetailActions.appendChild(actionBtn("Done", "button primary", closeDocDetail));
+}
+
+async function updateDocStatus(type, id, status) {
+  const path = type === "quote" ? `/api/quotes/${id}/status` : `/api/orders/${id}/status`;
+  const { error } = await apiRequest("PATCH", path, { status });
+  if (error) { showTransientToast(error); return; }
+  showTransientToast(`${type === "quote" ? "Quote" : "Order"} status updated.`);
+  openDocDetail(type, id);
+}
+
+async function convertQuote(id) {
+  if (!confirm("Convert this quote to an order? The quote will be locked from further edits.")) return;
+  const { data, error } = await apiRequest("POST", `/api/quotes/${id}/convert`);
+  if (error) { showTransientToast(error); return; }
+  showTransientToast(`Order ${data.order.orderNumber} created.`);
+  closeDocDetail();
+  commerceTab = "orders";
+  if (docStatusFilter) docStatusFilter.value = "";
+  openQuotesModal();
+}
+
+async function deleteDoc(type, id) {
+  const label = type === "quote" ? "quote" : "order";
+  if (!confirm(`Delete this ${label}? This cannot be undone.`)) return;
+  const path = type === "quote" ? `/api/quotes/${id}` : `/api/orders/${id}`;
+  const { error } = await apiRequest("DELETE", path);
+  if (error) { showTransientToast(error); return; }
+  showTransientToast(`${label[0].toUpperCase()}${label.slice(1)} deleted.`);
+  closeDocDetail();
+  renderDocList();
+}
+
+function editQuote(doc) {
+  closeDocDetail();
+  openQuoteForm(doc);
+}
+
+/* ===================== Phase 6: Inventory ===================== */
+
+const INV_STATUS_LABELS = { in_stock: "In stock", low_stock: "Low stock", out_of_stock: "Out of stock" };
+
+function openInventoryModal() {
+  if (!inventoryModal) return;
+  const signedIn = !!getApiToken();
+  if (inventorySignInPrompt) inventorySignInPrompt.style.display = signedIn ? "none" : "block";
+  if (inventoryPanel) inventoryPanel.style.display = signedIn ? "block" : "none";
+  inventoryModal.classList.remove("hidden");
+  if (signedIn) {
+    renderInventorySummary();
+    renderInventoryList();
+  }
+}
+
+function closeInventoryModal() {
+  if (inventoryModal) inventoryModal.classList.add("hidden");
+}
+
+async function renderInventorySummary() {
+  if (!inventorySummary) return;
+  const { data, error } = await apiRequest("GET", "/api/inventory/summary");
+  if (error || !data?.summary) { inventorySummary.innerHTML = ""; return; }
+  const s = data.summary;
+  inventorySummary.innerHTML = `
+    <div class="inv-chip"><div class="n">${s.total}</div><div class="l">Items</div></div>
+    <div class="inv-chip low"><div class="n">${s.lowStock}</div><div class="l">Low</div></div>
+    <div class="inv-chip out"><div class="n">${s.outOfStock}</div><div class="l">Out</div></div>
+    <div class="inv-chip"><div class="n">${fmtMoney(s.stockValue)}</div><div class="l">Stock value</div></div>`;
+}
+
+async function renderInventoryList() {
+  if (!inventoryList) return;
+  inventoryList.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  const q = (inventorySearchInput?.value || "").trim();
+  const status = inventoryStatusFilter?.value || "";
+  const params = [];
+  if (q) params.push(`q=${encodeURIComponent(q)}`);
+  if (status) params.push(`status=${encodeURIComponent(status)}`);
+  const qs = params.length ? `?${params.join("&")}` : "";
+
+  const { data, error } = await apiRequest("GET", `/api/inventory${qs}`);
+  if (error) { inventoryList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
+  const items = data?.items || [];
+  if (!items.length) {
+    inventoryList.innerHTML = `<p class="muted" style="padding:12px;">No items${q || status ? " match this filter" : " yet. Tap + New Item"}.</p>`;
+    return;
+  }
+  inventoryList.innerHTML = "";
+  items.forEach((it) => inventoryList.appendChild(invCard(it)));
+}
+
+function invCard(it) {
+  const card = document.createElement("div");
+  card.className = "inv-card" + (it.status === "low_stock" ? " low" : it.status === "out_of_stock" ? " out" : "");
+  card.innerHTML = `
+    <div>
+      <div class="name">${escHtml(it.name)}</div>
+      <div class="meta">${it.brand ? escHtml(it.brand) + " · " : ""}${it.sku ? escHtml(it.sku) + " · " : ""}${statusBadge(it.status, INV_STATUS_LABELS)}</div>
+    </div>
+    <div class="qty">${it.quantity} <small>${escHtml(it.unit)}</small></div>`;
+  card.addEventListener("click", () => openInventoryDetail(it.id));
+  return card;
+}
+
+function populateInvShadePicker(selectedShadeId) {
+  if (!invShadePicker) return;
+  const cat = Array.isArray(SHADE_CATALOG) ? SHADE_CATALOG : [];
+  invShadePicker.innerHTML =
+    `<option value="">No linked shade</option>` +
+    cat.map((s) =>
+      `<option value="${escHtml(s.id || "")}" data-price="${s.pricePerL || 0}" data-brand="${escHtml(s.brand || "")}" data-name="${escHtml(s.name || "")}">${escHtml(s.name)}${s.brand ? " — " + escHtml(s.brand) : ""}</option>`
+    ).join("");
+  if (selectedShadeId) invShadePicker.value = selectedShadeId;
+}
+
+function openInventoryForm(item = null) {
+  if (!inventoryFormModal) return;
+  editingInventoryId = item?.id || null;
+  if (inventoryFormTitle) inventoryFormTitle.textContent = item ? "Edit Item" : "New Item";
+  if (saveInventoryBtn) saveInventoryBtn.textContent = item ? "Update Item" : "Save Item";
+  if (inventoryFormError) inventoryFormError.textContent = "";
+
+  populateInvShadePicker(item?.shadeId);
+  setVal("invName", item?.name || "");
+  setVal("invBrand", item?.brand || "");
+  setVal("invSku", item?.sku || "");
+  setVal("invUnit", item?.unit || "litre");
+  setVal("invQuantity", item?.quantity ?? 0);
+  setVal("invReorder", item?.reorderLevel ?? 0);
+  setVal("invUnitPrice", item?.unitPrice ?? 0);
+  setVal("invCostPrice", item?.costPrice ?? 0);
+  setVal("invNotes", item?.notes || "");
+
+  // Opening quantity is only editable on create; existing stock moves via adjust.
+  if (invQtyField) invQtyField.style.display = item ? "none" : "";
+
+  inventoryFormModal.classList.remove("hidden");
+}
+
+function setVal(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value;
+}
+
+function closeInventoryForm() {
+  if (inventoryFormModal) inventoryFormModal.classList.add("hidden");
+  if (inventoryForm) inventoryForm.reset();
+  editingInventoryId = null;
+}
+
+async function handleInventorySubmit(e) {
+  e.preventDefault();
+  const name = (document.getElementById("invName")?.value || "").trim();
+  if (!name) { inventoryFormError.textContent = "Product name is required."; return; }
+
+  const payload = {
+    name,
+    brand: (document.getElementById("invBrand")?.value || "").trim(),
+    sku: (document.getElementById("invSku")?.value || "").trim(),
+    unit: (document.getElementById("invUnit")?.value || "litre").trim(),
+    reorderLevel: Number(document.getElementById("invReorder")?.value) || 0,
+    unitPrice: Number(document.getElementById("invUnitPrice")?.value) || 0,
+    costPrice: Number(document.getElementById("invCostPrice")?.value) || 0,
+    shadeId: invShadePicker?.value || "",
+    notes: (document.getElementById("invNotes")?.value || "").trim(),
+  };
+  if (!editingInventoryId) {
+    payload.quantity = Number(document.getElementById("invQuantity")?.value) || 0;
+  }
+
+  if (saveInventoryBtn) saveInventoryBtn.disabled = true;
+  const { error } = editingInventoryId
+    ? await apiRequest("PUT", `/api/inventory/${editingInventoryId}`, payload)
+    : await apiRequest("POST", "/api/inventory", payload);
+  if (saveInventoryBtn) saveInventoryBtn.disabled = false;
+
+  if (error) { inventoryFormError.textContent = error; return; }
+  const wasEditing = editingInventoryId;
+  closeInventoryForm();
+  showTransientToast(wasEditing ? "Item updated." : "Item added.");
+  renderInventorySummary();
+  if (wasEditing && currentInventoryId === wasEditing) {
+    openInventoryDetail(wasEditing);
+  } else {
+    renderInventoryList();
+  }
+}
+
+async function openInventoryDetail(id) {
+  if (!inventoryDetailModal || !inventoryDetailBody) return;
+  currentInventoryId = id;
+  inventoryDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  inventoryDetailModal.classList.remove("hidden");
+
+  const { data, error } = await apiRequest("GET", `/api/inventory/${id}`);
+  const item = data?.item;
+  if (error || !item) {
+    inventoryDetailBody.innerHTML = `<p class="muted">${escHtml(error || "Not found.")}</p>`;
+    return;
+  }
+  currentInventoryObj = item;
+  renderInventoryDetail(item);
+}
+
+function renderInventoryDetail(item) {
+  if (inventoryDetailTitle) inventoryDetailTitle.textContent = item.name;
+  const movements = item.movements || [];
+  const movementRows = movements.length
+    ? movements.map((m) => `
+        <tr>
+          <td>${new Date(m.createdAt).toLocaleString()}${m.reason ? `<div class="muted tiny">${escHtml(m.reason)}</div>` : ""}</td>
+          <td class="${m.delta >= 0 ? "pos" : "neg"}">${m.delta >= 0 ? "+" : ""}${m.delta}</td>
+          <td>${m.balanceAfter}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="3" class="muted tiny">No movements yet.</td></tr>`;
+
+  inventoryDetailBody.innerHTML = `
+    <div class="info">
+      <div class="info-row"><span class="label">Status</span>${statusBadge(item.status, INV_STATUS_LABELS)}</div>
+      <div class="info-row"><span class="label">On hand</span><strong>${item.quantity} ${escHtml(item.unit)}</strong></div>
+      <div class="info-row"><span class="label">Reorder level</span>${item.reorderLevel} ${escHtml(item.unit)}</div>
+      ${item.brand ? `<div class="info-row"><span class="label">Brand</span>${escHtml(item.brand)}</div>` : ""}
+      ${item.sku ? `<div class="info-row"><span class="label">SKU</span>${escHtml(item.sku)}</div>` : ""}
+      <div class="info-row"><span class="label">Selling</span>${fmtMoney(item.unitPrice)}</div>
+      <div class="info-row"><span class="label">Cost</span>${fmtMoney(item.costPrice)}</div>
+      ${item.notes ? `<div class="info-row"><span class="label">Notes</span>${escHtml(item.notes)}</div>` : ""}
+    </div>
+    <div class="inv-adjust">
+      <h4>Adjust stock</h4>
+      <div class="inv-adjust-row">
+        <button type="button" class="button tiny ghost" id="invReceiveBtn">Receive</button>
+        <button type="button" class="button tiny ghost" id="invIssueBtn">Issue</button>
+        <input class="inv-delta" id="invDeltaInput" type="number" step="0.01" placeholder="± qty" />
+        <input class="inv-reason" id="invReasonInput" type="text" placeholder="Reason (optional)" />
+        <button type="button" class="button tiny primary" id="invApplyBtn">Apply</button>
+      </div>
+    </div>
+    <h4 class="section-label">Recent movements</h4>
+    <table class="inv-movements">
+      <thead><tr><th>When</th><th>Change</th><th>Balance</th></tr></thead>
+      <tbody>${movementRows}</tbody>
+    </table>`;
+
+  const deltaInput = document.getElementById("invDeltaInput");
+  document.getElementById("invReceiveBtn")?.addEventListener("click", () => {
+    const v = Math.abs(Number(deltaInput.value) || 0);
+    deltaInput.value = v || "";
+    deltaInput.focus();
+  });
+  document.getElementById("invIssueBtn")?.addEventListener("click", () => {
+    const v = Math.abs(Number(deltaInput.value) || 0);
+    deltaInput.value = v ? -v : "";
+    deltaInput.focus();
+  });
+  document.getElementById("invApplyBtn")?.addEventListener("click", () => applyInventoryAdjust(item.id));
+}
+
+async function applyInventoryAdjust(id) {
+  const delta = Number(document.getElementById("invDeltaInput")?.value);
+  const reason = (document.getElementById("invReasonInput")?.value || "").trim();
+  if (!delta) { showTransientToast("Enter a non-zero quantity change."); return; }
+  const { error } = await apiRequest("POST", `/api/inventory/${id}/adjust`, { delta, reason });
+  if (error) { showTransientToast(error); return; }
+  showTransientToast("Stock updated.");
+  renderInventorySummary();
+  openInventoryDetail(id);
+}
+
+function closeInventoryDetail() {
+  if (inventoryDetailModal) inventoryDetailModal.classList.add("hidden");
+  currentInventoryId = null;
+  currentInventoryObj = null;
+}
+
+function editCurrentInventory() {
+  if (currentInventoryObj) {
+    closeInventoryDetail();
+    openInventoryForm(currentInventoryObj);
+  }
+}
+
+async function deleteCurrentInventory() {
+  if (!currentInventoryId) return;
+  const name = currentInventoryObj?.name || "this item";
+  if (!confirm(`Delete ${name}? Its stock history will be removed.`)) return;
+  const { error } = await apiRequest("DELETE", `/api/inventory/${currentInventoryId}`);
+  if (error) { showTransientToast(error); return; }
+  showTransientToast("Item deleted.");
+  closeInventoryDetail();
+  renderInventorySummary();
+  renderInventoryList();
+}
+
+/* ===================== Phase 6: Credit Ledger & Reminders ===================== */
+
+const LEDGER_SOURCE_LABELS = {
+  order: "Order",
+  payment: "Payment",
+  manual: "Manual",
+  adjustment: "Adjustment",
+  reversal: "Reversal",
+};
+const REMINDER_CHANNEL_LABELS = {
+  manual: "Logged",
+  call: "Call",
+  sms: "SMS",
+  whatsapp: "WhatsApp",
+  email: "Email",
+};
+
+function openLedgerModal() {
+  if (!ledgerModal) return;
+  const signedIn = !!getApiToken();
+  if (ledgerSignInPrompt) ledgerSignInPrompt.style.display = signedIn ? "none" : "block";
+  if (ledgerPanel) ledgerPanel.style.display = signedIn ? "block" : "none";
+  ledgerModal.classList.remove("hidden");
+  if (signedIn) {
+    renderLedgerSummary();
+    renderLedgerList();
+  }
+}
+
+function closeLedgerModal() {
+  if (ledgerModal) ledgerModal.classList.add("hidden");
+}
+
+async function renderLedgerSummary() {
+  if (!ledgerSummary) return;
+  const { data, error } = await apiRequest("GET", "/api/ledger/summary");
+  if (error || !data?.summary) { ledgerSummary.innerHTML = ""; return; }
+  const s = data.summary;
+  ledgerSummary.innerHTML = `
+    <div class="inv-chip"><div class="n">${fmtMoney(s.receivable)}</div><div class="l">Receivable</div></div>
+    <div class="inv-chip out"><div class="n">${fmtMoney(s.overdueAmount)}</div><div class="l">Overdue</div></div>
+    <div class="inv-chip"><div class="n">${s.debtors}</div><div class="l">Owe you</div></div>
+    <div class="inv-chip low"><div class="n">${s.overdueCustomers}</div><div class="l">Overdue</div></div>`;
+}
+
+const ledgerPaginator = createPaginator();
+
+function ledgerListQuery() {
+  const q = (ledgerSearchInput?.value || "").trim();
+  const overdue = ledgerFilter?.value === "overdue";
+  const params = [];
+  if (q) params.push(`q=${encodeURIComponent(q)}`);
+  if (overdue) params.push("overdue=true");
+  let path = "/api/ledger/customers";
+  if (params.length) path += `?${params.join("&")}`;
+  return path;
+}
+
+// Renders the first page (resets paging). Safe to pass as an event listener.
+async function renderLedgerList() {
+  if (!ledgerList) return;
+  ledgerPaginator.reset();
+  ledgerList.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  await fetchLedgerPage(false);
+}
+
+async function loadMoreLedger() {
+  await fetchLedgerPage(true);
+}
+
+async function fetchLedgerPage(append) {
+  if (!ledgerList) return;
+  const path = withPageParams(ledgerListQuery(), ledgerPaginator.params());
+  const { data, error } = await apiRequest("GET", path);
+  const oldBtn = ledgerList.querySelector(".load-more-row");
+  if (oldBtn) oldBtn.remove();
+  if (error) {
+    if (!append) ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`;
+    return;
+  }
+  const customers = data?.customers || [];
+  ledgerPaginator.absorb(data?.pagination);
+  if (!append) ledgerList.innerHTML = "";
+  if (!customers.length && !append) {
+    const q = (ledgerSearchInput?.value || "").trim();
+    const overdue = ledgerFilter?.value === "overdue";
+    ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${
+      overdue || q ? "No accounts match this filter." : "No outstanding balances. Order totals post here automatically."
+    }</p>`;
+    return;
+  }
+  customers.forEach((c) => ledgerList.appendChild(ledgerCard(c)));
+  if (ledgerPaginator.hasMore) ledgerList.appendChild(ledgerLoadMoreRow());
+}
+
+function ledgerLoadMoreRow() {
+  const row = document.createElement("div");
+  row.className = "load-more-row";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "button ghost";
+  const remaining = Math.max(0, ledgerPaginator.total - ledgerPaginator.offset);
+  btn.textContent = remaining > 0 ? `Load more (${remaining} more)` : "Load more";
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    btn.textContent = "Loading…";
+    loadMoreLedger();
+  });
+  row.appendChild(btn);
+  return row;
+}
+
+function ledgerCard(c) {
+  const card = document.createElement("div");
+  card.className = "inv-card" + (c.overdue ? " out" : "");
+  const overdueTag = c.overdue
+    ? `<span class="status-badge out_of_stock">Overdue ${overdueDaysLabel(c.oldestOverdueDate)}</span>`
+    : "";
+  const reminded = c.lastReminderAt
+    ? ` · reminded ${new Date(c.lastReminderAt).toLocaleDateString()}`
+    : "";
+  card.innerHTML = `
+    <div>
+      <div class="name">${escHtml(c.customerName)}</div>
+      <div class="meta">${escHtml(c.phone || "")}${reminded} ${overdueTag}</div>
+    </div>
+    <div class="qty">${fmtMoney(c.balance)}<small>owes</small></div>`;
+  card.addEventListener("click", () => openLedgerDetail(c.customerId));
+  return card;
+}
+
+async function openLedgerDetail(customerId) {
+  if (!ledgerDetailModal || !ledgerDetailBody) return;
+  currentLedgerCustomerId = customerId;
+  ledgerDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
+  ledgerDetailModal.classList.remove("hidden");
+
+  const { data, error } = await apiRequest("GET", `/api/ledger/customers/${customerId}`);
+  const ledger = data?.ledger;
+  if (error || !ledger) {
+    ledgerDetailBody.innerHTML = `<p class="muted">${escHtml(error || "Not found.")}</p>`;
+    return;
+  }
+  renderLedgerDetail(ledger);
+}
+
+function renderLedgerDetail(ledger) {
+  if (ledgerDetailTitle) ledgerDetailTitle.textContent = ledger.customerName;
+
+  const entries = ledger.entries || [];
+  const entryRows = entries.length
+    ? entries.map((e) => {
+        const signed = e.entryType === "debit" ? `+${fmtMoney(e.amount)}` : `− ${fmtMoney(e.amount)}`;
+        const label = LEDGER_SOURCE_LABELS[e.source] || e.source;
+        const due = e.dueDate ? ` · due ${new Date(e.dueDate).toLocaleDateString()}` : "";
+        const detail = e.note || e.referenceLabel || label;
+        return `
+        <tr>
+          <td>${new Date(e.createdAt).toLocaleDateString()}<div class="muted tiny">${escHtml(detail)}${due}</div></td>
+          <td class="${e.entryType === "debit" ? "neg" : "pos"}">${signed}</td>
+          <td>${fmtMoney(e.balanceAfter)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="3" class="muted tiny">No ledger activity yet.</td></tr>`;
+
+  const reminders = ledger.reminders || [];
+  const reminderRows = reminders.length
+    ? reminders.map((r) => `
+        <li>
+          <span class="status-badge sent">${REMINDER_CHANNEL_LABELS[r.channel] || r.channel}</span>
+          <span class="muted tiny">${new Date(r.createdAt).toLocaleString()} · balance ${fmtMoney(r.balanceAtReminder)}</span>
+          ${r.note ? `<div class="tiny">${escHtml(r.note)}</div>` : ""}
+        </li>`).join("")
+    : `<li class="muted tiny">No reminders logged yet.</li>`;
+
+  ledgerDetailBody.innerHTML = `
+    <div class="info">
+      <div class="info-row"><span class="label">Balance</span><span>${balanceSummaryLine(ledger.balance)}</span></div>
+      ${ledger.overdue ? `<div class="info-row"><span class="label">Status</span><span class="status-badge out_of_stock">Overdue ${overdueDaysLabel(ledger.oldestOverdueDate)}</span></div>` : ""}
+      ${ledger.phone ? `<div class="info-row"><span class="label">Phone</span>${escHtml(ledger.phone)}</div>` : ""}
+    </div>
+
+    <div class="inv-adjust">
+      <h4>Record a transaction</h4>
+      <div class="ledger-entry-row">
+        <input class="inv-delta" id="ledgerAmountInput" type="number" min="0" step="0.01" placeholder="Amount ₹" />
+        <input class="inv-reason" id="ledgerNoteInput" type="text" placeholder="Note (optional)" />
+        <input class="ledger-due" id="ledgerDueInput" type="date" title="Due date (charges)" />
+      </div>
+      <div class="ledger-entry-actions">
+        <button type="button" class="button tiny primary" id="ledgerPaymentBtn">Record payment</button>
+        <button type="button" class="button tiny ghost" id="ledgerChargeBtn">Add charge</button>
+      </div>
+    </div>
+
+    <div class="inv-adjust">
+      <h4>Log a reminder</h4>
+      <div class="ledger-entry-row">
+        <select class="crm-search" id="ledgerChannelSelect" style="flex:0 0 auto;">
+          <option value="whatsapp">WhatsApp</option>
+          <option value="call">Call</option>
+          <option value="sms">SMS</option>
+          <option value="email">Email</option>
+          <option value="manual">Other</option>
+        </select>
+        <input class="inv-reason" id="ledgerReminderNote" type="text" placeholder="Reminder note (optional)" />
+        <button type="button" class="button tiny ghost" id="ledgerReminderBtn">Log reminder</button>
+      </div>
+    </div>
+
+    <h4 class="section-label">Statement</h4>
+    <table class="inv-movements">
+      <thead><tr><th>When</th><th>Amount</th><th>Balance</th></tr></thead>
+      <tbody>${entryRows}</tbody>
+    </table>
+
+    <h4 class="section-label">Reminders</h4>
+    <ul class="ledger-reminders">${reminderRows}</ul>`;
+
+  document.getElementById("ledgerPaymentBtn")?.addEventListener("click", () => addLedgerEntry(ledger.customerId, "credit"));
+  document.getElementById("ledgerChargeBtn")?.addEventListener("click", () => addLedgerEntry(ledger.customerId, "debit"));
+  document.getElementById("ledgerReminderBtn")?.addEventListener("click", () => logLedgerReminder(ledger.customerId));
+}
+
+async function addLedgerEntry(customerId, entryType) {
+  const amount = Number(document.getElementById("ledgerAmountInput")?.value);
+  const note = (document.getElementById("ledgerNoteInput")?.value || "").trim();
+  const dueDate = document.getElementById("ledgerDueInput")?.value || null;
+  if (!amount || amount <= 0) { showTransientToast("Enter an amount greater than zero."); return; }
+
+  const body = { entryType, amount, note, source: entryType === "credit" ? "payment" : "manual" };
+  if (entryType === "debit" && dueDate) body.dueDate = dueDate;
+
+  const { error } = await apiRequest("POST", `/api/ledger/customers/${customerId}/entries`, body);
+  if (error) { showTransientToast(error); return; }
+  showTransientToast(entryType === "credit" ? "Payment recorded." : "Charge added.");
+  renderLedgerSummary();
+  openLedgerDetail(customerId);
+}
+
+async function logLedgerReminder(customerId) {
+  const channel = document.getElementById("ledgerChannelSelect")?.value || "manual";
+  const note = (document.getElementById("ledgerReminderNote")?.value || "").trim();
+  const { error } = await apiRequest("POST", `/api/ledger/customers/${customerId}/reminders`, { channel, note });
+  if (error) { showTransientToast(error); return; }
+  showTransientToast("Reminder logged.");
+  openLedgerDetail(customerId);
+}
+
+function closeLedgerDetail() {
+  if (ledgerDetailModal) ledgerDetailModal.classList.add("hidden");
+  currentLedgerCustomerId = null;
+  // Refresh the list so updated balances / reminder dates show immediately.
+  if (ledgerModal && !ledgerModal.classList.contains("hidden")) renderLedgerList();
+}
+
+/* ===================== Phase 3: Pilot Validation Analytics ===================== */
 
 function loadAnalytics() {
   try {
@@ -2290,6 +3177,7 @@ function startPilotSession() {
   pilotFirstShadeTs = null;
   pilotFirstActionTs = null;
   trackEvent("session_start", { dealer: dealerSettings.shopName || "" });
+  syncPreviewSessionToServer("session_start", { summary: "Preview session started" });
 }
 
 function trackShadeSelected(shade) {
@@ -2298,6 +3186,10 @@ function trackShadeSelected(shade) {
   if (!pilotFirstShadeTs) pilotFirstShadeTs = Date.now();
   const ttFirstShade = isFirst ? pilotFirstShadeTs - (pilotSessionStart || pilotFirstShadeTs) : null;
   trackEvent("shade_selected", { hex: shade.hex, name: shade.name, brand: shade.brand || "", ttFirstShade });
+  syncPreviewSessionToServer("shade_selected", {
+    summary: `Selected ${shade.name}`,
+    shades: [{ hex: shade.hex, name: shade.name, brand: shade.brand || "" }],
+  });
 }
 
 function trackShareExport() {
@@ -2321,52 +3213,24 @@ function trackContactSaved(leadId) {
   trackEvent("contact_saved", { leadId, ttAction });
 }
 
-function renderAnalytics() {
-  const panel = document.getElementById("analyticsPanel");
-  if (!panel) return;
-
-  const now = Date.now();
-  const MS_30D = 30 * 24 * 60 * 60 * 1000;
-  const recent = analyticsEvents.filter((e) => now - e.ts < MS_30D);
-
-  const startEvents = recent.filter((e) => e.type === "session_start");
-  const totalSessions = startEvents.length;
-
-  // avg time to first shade pick (ms → seconds)
-  const firstShadeEvents = recent.filter((e) => e.type === "shade_selected" && e.data.ttFirstShade != null);
-  const avgShadeMs = firstShadeEvents.length
-    ? firstShadeEvents.reduce((s, e) => s + e.data.ttFirstShade, 0) / firstShadeEvents.length
-    : 0;
-  const avgShadeSec = Math.round(avgShadeMs / 1000);
-
-  // sessions that had a contact_saved event
-  const contactSessionIds = new Set(recent.filter((e) => e.type === "contact_saved").map((e) => e.sessionId));
-  const contactCount = contactSessionIds.size;
-  const contactRate = totalSessions ? Math.round((contactCount / totalSessions) * 100) : 0;
-
-  // sessions that had a share_exported event
-  const shareSessionIds = new Set(recent.filter((e) => e.type === "share_exported").map((e) => e.sessionId));
-  const shareCount = shareSessionIds.size;
-  const shareRate = totalSessions ? Math.round((shareCount / totalSessions) * 100) : 0;
-
-  // sessions per day, last 7 days
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now);
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - i);
-    const dayEnd = d.getTime() + 86400000;
-    const count = startEvents.filter((e) => e.ts >= d.getTime() && e.ts < dayEnd).length;
-    days.push({ label: dayNames[d.getDay()], count, isToday: i === 0 });
-  }
-  const maxDay = Math.max(1, ...days.map((d) => d.count));
+function buildAnalyticsHtml(metrics) {
+  const {
+    totalSessions,
+    avgShadeSec,
+    contactCount,
+    contactRate,
+    shareCount,
+    shareRate,
+    days,
+    maxDay,
+    sourceNote,
+  } = metrics;
 
   const emptyMsg = totalSessions === 0
     ? `<p class="analytics-empty">No pilot sessions yet.<br>Analytics start when a customer uploads their first room photo.</p>`
     : "";
 
-  panel.innerHTML = `
+  return `
     <div class="analytics-grid">
       <div class="analytics-card">
         <div class="a-label">Sessions (30d)</div>
@@ -2400,8 +3264,115 @@ function renderAnalytics() {
       `).join("")}
     </div>
     ${emptyMsg}
-    <p class="muted tiny" style="margin-top:12px;">Data is stored locally on this device. Export via Settings → Download Analytics JSON.</p>
+    <p class="muted tiny" style="margin-top:12px;">${sourceNote}</p>
   `;
+}
+
+function buildLast7DayBars(startEvents) {
+  const now = Date.now();
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const dayEnd = d.getTime() + 86400000;
+    const count = startEvents.filter((e) => e.ts >= d.getTime() && e.ts < dayEnd).length;
+    days.push({ label: dayNames[d.getDay()], count, isToday: i === 0 });
+  }
+  return { days, maxDay: Math.max(1, ...days.map((d) => d.count)) };
+}
+
+function buildAnalyticsHtmlFromLocal() {
+  const now = Date.now();
+  const MS_30D = 30 * 24 * 60 * 60 * 1000;
+  const recent = analyticsEvents.filter((e) => now - e.ts < MS_30D);
+
+  const startEvents = recent.filter((e) => e.type === "session_start");
+  const totalSessions = startEvents.length;
+
+  const firstShadeEvents = recent.filter((e) => e.type === "shade_selected" && e.data.ttFirstShade != null);
+  const avgShadeMs = firstShadeEvents.length
+    ? firstShadeEvents.reduce((s, e) => s + e.data.ttFirstShade, 0) / firstShadeEvents.length
+    : 0;
+  const avgShadeSec = Math.round(avgShadeMs / 1000);
+
+  const contactSessionIds = new Set(recent.filter((e) => e.type === "contact_saved").map((e) => e.sessionId));
+  const contactCount = contactSessionIds.size;
+  const contactRate = totalSessions ? Math.round((contactCount / totalSessions) * 100) : 0;
+
+  const shareSessionIds = new Set(recent.filter((e) => e.type === "share_exported").map((e) => e.sessionId));
+  const shareCount = shareSessionIds.size;
+  const shareRate = totalSessions ? Math.round((shareCount / totalSessions) * 100) : 0;
+
+  const { days, maxDay } = buildLast7DayBars(startEvents);
+
+  return buildAnalyticsHtml({
+    totalSessions,
+    avgShadeSec,
+    contactCount,
+    contactRate,
+    shareCount,
+    shareRate,
+    days,
+    maxDay,
+    sourceNote: "Data is stored locally on this device. Sign in to see combined metrics from all devices.",
+  });
+}
+
+function buildAnalyticsHtmlFromServer(summary) {
+  const totalSessions = summary.sessions || 0;
+  const avgShadeSec = summary.avgDecisionMs ? Math.round(summary.avgDecisionMs / 1000) : 0;
+  const contactCount = summary.contacts || 0;
+  const contactRate = summary.contactRate || 0;
+  const shareCount = summary.shares || 0;
+  const shareRate = summary.shareRate || 0;
+
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dailyMap = new Map();
+  for (const row of summary.daily || []) {
+    const key = String(row.day).slice(0, 10);
+    dailyMap.set(key, parseInt(row.sessions, 10) || 0);
+  }
+
+  const now = new Date();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    days.push({ label: dayNames[d.getDay()], count: dailyMap.get(key) || 0, isToday: i === 0 });
+  }
+  const maxDay = Math.max(1, ...days.map((d) => d.count));
+
+  return buildAnalyticsHtml({
+    totalSessions,
+    avgShadeSec,
+    contactCount,
+    contactRate,
+    shareCount,
+    shareRate,
+    days,
+    maxDay,
+    sourceNote: "Data from server — combined across all signed-in devices.",
+  });
+}
+
+async function renderAnalytics() {
+  const panel = document.getElementById("analyticsPanel");
+  if (!panel) return;
+
+  if (getApiToken()) {
+    panel.innerHTML = `<p class="muted tiny">Loading analytics…</p>`;
+    const { data, error } = await apiRequest("GET", "/api/events/summary");
+    if (!error && data) {
+      panel.innerHTML = buildAnalyticsHtmlFromServer(data);
+      return;
+    }
+  }
+
+  panel.innerHTML = buildAnalyticsHtmlFromLocal();
 }
 
 function exportAnalyticsJson() {
@@ -2660,6 +3631,87 @@ if (closeDetailBtn) closeDetailBtn.addEventListener("click", closeLeadDetail);
 if (deleteLeadBtn) deleteLeadBtn.addEventListener("click", deleteCurrentLead);
 if (exportLeadBtn) exportLeadBtn.addEventListener("click", exportCurrentLeadPackage);
 
+// Phase 5: CRM
+if (customersBtn) customersBtn.addEventListener("click", openCustomersModal);
+if (closeCustomersBtn) closeCustomersBtn.addEventListener("click", closeCustomersModal);
+if (closeCustomers2Btn) closeCustomers2Btn.addEventListener("click", closeCustomersModal);
+if (newCustomerBtn) newCustomerBtn.addEventListener("click", openNewCustomerModal);
+if (closeNewCustomerBtn) closeNewCustomerBtn.addEventListener("click", closeNewCustomerModal);
+if (cancelNewCustomerBtn) cancelNewCustomerBtn.addEventListener("click", closeNewCustomerModal);
+if (newCustomerForm) newCustomerForm.addEventListener("submit", handleNewCustomerSubmit);
+if (closeCustomerDetailBtn) closeCustomerDetailBtn.addEventListener("click", closeCustomerDetail);
+if (closeCustomerDetail2Btn) closeCustomerDetail2Btn.addEventListener("click", closeCustomerDetail);
+if (addSiteBtn) addSiteBtn.addEventListener("click", openSiteModal);
+if (editCustomerBtn) editCustomerBtn.addEventListener("click", editCurrentCustomer);
+if (deleteCustomerBtn) deleteCustomerBtn.addEventListener("click", deleteCurrentCustomer);
+if (siteForm) siteForm.addEventListener("submit", handleSiteSubmit);
+if (closeSiteBtn) closeSiteBtn.addEventListener("click", closeSiteModal);
+if (cancelSiteBtn) cancelSiteBtn.addEventListener("click", closeSiteModal);
+if (customerSearchInput) {
+  customerSearchInput.addEventListener("input", () => {
+    renderCustomersList(customerSearchInput.value.trim());
+  });
+}
+if (leadCustomerSelect) {
+  leadCustomerSelect.addEventListener("change", () => {
+    populateLeadSites(leadCustomerSelect.value);
+  });
+}
+
+// Phase 6: Quotes & Orders
+if (quotesBtn) quotesBtn.addEventListener("click", openQuotesModal);
+if (closeQuotesBtn) closeQuotesBtn.addEventListener("click", closeQuotesModal);
+if (closeQuotes2Btn) closeQuotes2Btn.addEventListener("click", closeQuotesModal);
+if (quotesTabBtn) quotesTabBtn.addEventListener("click", () => switchCommerceTab("quotes"));
+if (ordersTabBtn) ordersTabBtn.addEventListener("click", () => switchCommerceTab("orders"));
+if (docStatusFilter) docStatusFilter.addEventListener("change", renderDocList);
+if (newQuoteBtn) newQuoteBtn.addEventListener("click", () => openQuoteForm());
+if (quoteForm) quoteForm.addEventListener("submit", handleQuoteSubmit);
+if (closeQuoteFormBtn) closeQuoteFormBtn.addEventListener("click", closeQuoteForm);
+if (cancelQuoteFormBtn) cancelQuoteFormBtn.addEventListener("click", closeQuoteForm);
+if (addQuoteItemBtn) addQuoteItemBtn.addEventListener("click", () => { addQuoteItemRow(blankItem()); recomputeQuoteTotals(); });
+if (quoteShadePicker) quoteShadePicker.addEventListener("change", onShadePicked);
+if (quoteCustomerSelect) quoteCustomerSelect.addEventListener("change", () => populateQuoteSites(quoteCustomerSelect.value));
+if (quoteDiscount) quoteDiscount.addEventListener("input", recomputeQuoteTotals);
+if (quoteTaxRate) quoteTaxRate.addEventListener("input", recomputeQuoteTotals);
+if (closeDocDetailBtn) closeDocDetailBtn.addEventListener("click", closeDocDetail);
+
+// Phase 6: Inventory
+if (inventoryBtn) inventoryBtn.addEventListener("click", openInventoryModal);
+if (closeInventoryBtn) closeInventoryBtn.addEventListener("click", closeInventoryModal);
+if (closeInventory2Btn) closeInventory2Btn.addEventListener("click", closeInventoryModal);
+if (newInventoryBtn) newInventoryBtn.addEventListener("click", () => openInventoryForm());
+if (inventoryForm) inventoryForm.addEventListener("submit", handleInventorySubmit);
+if (closeInventoryFormBtn) closeInventoryFormBtn.addEventListener("click", closeInventoryForm);
+if (cancelInventoryFormBtn) cancelInventoryFormBtn.addEventListener("click", closeInventoryForm);
+if (closeInventoryDetailBtn) closeInventoryDetailBtn.addEventListener("click", closeInventoryDetail);
+if (closeInventoryDetail2Btn) closeInventoryDetail2Btn.addEventListener("click", closeInventoryDetail);
+if (editInventoryBtn) editInventoryBtn.addEventListener("click", editCurrentInventory);
+if (deleteInventoryBtn) deleteInventoryBtn.addEventListener("click", deleteCurrentInventory);
+if (inventorySearchInput) inventorySearchInput.addEventListener("input", renderInventoryList);
+if (inventoryStatusFilter) inventoryStatusFilter.addEventListener("change", renderInventoryList);
+if (invShadePicker) {
+  invShadePicker.addEventListener("change", () => {
+    const opt = invShadePicker.selectedOptions[0];
+    if (!opt || !opt.value) return;
+    const nameEl = document.getElementById("invName");
+    const brandEl = document.getElementById("invBrand");
+    const priceEl = document.getElementById("invUnitPrice");
+    if (nameEl && !nameEl.value) nameEl.value = opt.dataset.name || "";
+    if (brandEl && !brandEl.value) brandEl.value = opt.dataset.brand || "";
+    if (priceEl && (!priceEl.value || priceEl.value === "0")) priceEl.value = opt.dataset.price || "0";
+  });
+}
+
+// Phase 6: Credit Ledger
+if (ledgerBtn) ledgerBtn.addEventListener("click", openLedgerModal);
+if (closeLedgerBtn) closeLedgerBtn.addEventListener("click", closeLedgerModal);
+if (closeLedger2Btn) closeLedger2Btn.addEventListener("click", closeLedgerModal);
+if (closeLedgerDetailBtn) closeLedgerDetailBtn.addEventListener("click", closeLedgerDetail);
+if (closeLedgerDetail2Btn) closeLedgerDetail2Btn.addEventListener("click", closeLedgerDetail);
+if (ledgerSearchInput) ledgerSearchInput.addEventListener("input", renderLedgerList);
+if (ledgerFilter) ledgerFilter.addEventListener("change", renderLedgerList);
+
 // Phase 3: leads modal tab buttons
 const leadsTabBtn = document.getElementById("leadsTabBtn");
 const analyticsTabBtn = document.getElementById("analyticsTabBtn");
@@ -2716,12 +3768,15 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
 })();
 
 // Backdrop click to close
-[contactModal, leadsModal, leadDetailModal, settingsModal].forEach((m) => {
+[contactModal, leadsModal, leadDetailModal, settingsModal, quotesModal, docDetailModal, inventoryModal, inventoryDetailModal, ledgerModal, ledgerDetailModal].forEach((m) => {
   if (!m) return;
   m.addEventListener("click", (e) => {
     if (e.target === m) {
       m.classList.add("hidden");
       if (m === leadDetailModal) currentDetailLeadId = null;
+      if (m === docDetailModal) currentDoc = null;
+      if (m === inventoryDetailModal) { currentInventoryId = null; currentInventoryObj = null; }
+      if (m === ledgerDetailModal) currentLedgerCustomerId = null;
     }
   });
 });
@@ -2729,6 +3784,38 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
 // Escape key support
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    if (ledgerDetailModal && !ledgerDetailModal.classList.contains("hidden")) {
+      closeLedgerDetail();
+      return;
+    }
+    if (ledgerModal && !ledgerModal.classList.contains("hidden")) {
+      closeLedgerModal();
+      return;
+    }
+    if (inventoryDetailModal && !inventoryDetailModal.classList.contains("hidden")) {
+      closeInventoryDetail();
+      return;
+    }
+    if (inventoryFormModal && !inventoryFormModal.classList.contains("hidden")) {
+      closeInventoryForm();
+      return;
+    }
+    if (inventoryModal && !inventoryModal.classList.contains("hidden")) {
+      closeInventoryModal();
+      return;
+    }
+    if (docDetailModal && !docDetailModal.classList.contains("hidden")) {
+      closeDocDetail();
+      return;
+    }
+    if (quoteFormModal && !quoteFormModal.classList.contains("hidden")) {
+      closeQuoteForm();
+      return;
+    }
+    if (quotesModal && !quotesModal.classList.contains("hidden")) {
+      closeQuotesModal();
+      return;
+    }
     if (leadDetailModal && !leadDetailModal.classList.contains("hidden")) {
       closeLeadDetail();
       return;

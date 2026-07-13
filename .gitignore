@@ -1,4 +1,7 @@
 server/node_modules/
+server/coverage/
+paint-preview-app/node_modules/
+paint-preview-app/dist/
 server/paintcrm.db
 server/paintcrm.db-shm
 server/paintcrm.db-wal
@@ -6,3 +9,6 @@ server/.env
 *.db
 *.db-shm
 *.db-wal
+
+# Local Cursor MCP config (contains API tokens)
+.cursor/mcp.json

@@ -1,29 +1,46 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { query } = require('../lib/db');
-const { requireAuth, JWT_SECRET } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
+const {
+  issueSession,
+  rotateRefreshToken,
+  revokeRefreshToken,
+  revokeAllForTenant,
+} = require('../lib/tokens');
 
 const router = express.Router();
-const TOKEN_TTL = '30d';
+
+// Password policy: at least 8 chars containing both a letter and a number.
+// Returns an error string, or null when the password is acceptable.
+function passwordPolicyError(password) {
+  if (typeof password !== 'string' || password.length < 8) {
+    return 'Password must be at least 8 characters';
+  }
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    return 'Password must include at least one letter and one number';
+  }
+  return null;
+}
 
 // Validation middleware
 const validateRegistration = (req, res, next) => {
   const { shopName, email, password } = req.body || {};
-  
+
   if (!shopName || !email || !password) {
     return res.status(400).json({ error: 'shopName, email, and password are required' });
   }
-  
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+  const pwError = passwordPolicyError(password);
+  if (pwError) {
+    return res.status(400).json({ error: pwError });
   }
-  
+
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Invalid email format' });
   }
-  
+
   next();
 };
 
@@ -68,14 +85,15 @@ router.post('/register', validateRegistration, async (req, res, next) => {
     );
     
     const tenant = tenantResult.rows[0];
-    const token = jwt.sign(
+    const session = await issueSession(
       { id, email: tenant.email, shopName: tenant.shop_name },
-      JWT_SECRET,
-      { expiresIn: TOKEN_TTL }
+      req.headers['user-agent']
     );
-    
+
     res.status(201).json({
-      token,
+      token: session.accessToken,
+      refreshToken: session.refreshToken,
+      expiresIn: session.accessTokenTtl,
       tenant: formatTenant(tenant)
     });
   } catch (err) {
@@ -109,17 +127,70 @@ router.post('/login', validateLogin, async (req, res, next) => {
       'UPDATE tenants SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
       [tenant.id]
     );
-    
-    const token = jwt.sign(
+
+    const session = await issueSession(
       { id: tenant.id, email: tenant.email, shopName: tenant.shop_name },
-      JWT_SECRET,
-      { expiresIn: TOKEN_TTL }
+      req.headers['user-agent']
     );
-    
+
     res.json({
-      token,
+      token: session.accessToken,
+      refreshToken: session.refreshToken,
+      expiresIn: session.accessTokenTtl,
       tenant: formatTenant(tenant)
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/refresh — exchange a refresh token for a new access token.
+// Rotates the refresh token (one-time use) and returns the replacement.
+router.post('/refresh', async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body || {};
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'refreshToken is required' });
+    }
+
+    const result = await rotateRefreshToken(refreshToken, req.headers['user-agent']);
+    if (result.error) {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    res.json({
+      token: result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresIn: result.accessTokenTtl,
+      tenant: formatTenant({
+        id: result.tenant.id,
+        email: result.tenant.email,
+        shop_name: result.tenant.shopName,
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/logout — revoke a single refresh token (this session).
+router.post('/logout', async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body || {};
+    if (refreshToken) {
+      await revokeRefreshToken(refreshToken);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/logout-all — revoke every active session for the tenant.
+router.post('/logout-all', requireAuth, async (req, res, next) => {
+  try {
+    await revokeAllForTenant(req.tenant.id);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

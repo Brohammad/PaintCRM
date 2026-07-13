@@ -86,7 +86,7 @@ The system is intentionally **offline-first**. A dealer should be able to run a 
 │                                                         │
 │   Static: serves paint-preview-app/ (same port)         │
 │                                                         │
-│   SQLite DB: tenants │ leads │ shades │ events          │
+│   PostgreSQL: tenants │ leads │ shades │ events          │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -96,11 +96,24 @@ The system is intentionally **offline-first**. A dealer should be able to run a 
 
 ```
 PaintCRM/
-├── paint-preview-app/          # Frontend (zero build step)
-│   ├── index.html              # Single-page app shell, all modals inline
-│   ├── script.js               # ~2750 lines, all logic — no framework
-│   ├── styles.css              # ~940 lines, custom design system
-│   ├── shades.json             # 63-shade catalog (Asian Paints, Dulux, Berger, Nerolac)
+├── paint-preview-app/          # Frontend (Vite build; ES modules)
+│   ├── index.html              # SPA shell + all modals; module entry = ./script.js
+│   ├── script.js               # UI/DOM logic (module entry), imports src/*
+│   ├── src/                    # Extracted, unit-tested ES modules (80 Vitest tests)
+│   │   ├── api.js              # token storage + apiRequest w/ refresh-on-401
+│   │   ├── color.js            # hex/RGB/HSL, pixel reads
+│   │   ├── segmentation.js     # wall detection, mask pipeline, ML fuse
+│   │   ├── tint.js             # alpha masks, recolor blend, suggestions
+│   │   ├── cost.js             # paint litres + INR estimate
+│   │   ├── format.js / ids.js  # CRM HTML helpers, offline id gen
+│   │   ├── utils.js            # escHtml / money / rounding helpers
+│   │   ├── pagination.js       # withPageParams + createPaginator
+│   │   └── *.test.js           # Vitest + jsdom unit tests
+│   ├── styles.css              # custom design system
+│   ├── shades.json             # 63-shade catalog (also copied to public/ for the build)
+│   ├── public/                 # Static assets copied verbatim into dist/
+│   ├── vite.config.js          # Vite + Vitest config (base './', outDir dist)
+│   ├── package.json            # dev/build/test scripts (vite, vitest, jsdom)
 │   └── react-canvas-component/ # Portable React/Next.js extraction of canvas logic
 │       ├── WallRecolorCanvas.tsx
 │       └── pixelUtils.ts
@@ -109,7 +122,8 @@ PaintCRM/
 │   ├── index.js                # Server entry point with graceful shutdown
 │   ├── app.js                  # Express app factory with all middleware
 │   ├── lib/
-│   │   └── db.js               # PostgreSQL connection pooling
+│   │   ├── db.js               # PostgreSQL connection pooling + query instrumentation
+│   │   └── metrics.js          # Shared Prometheus registry and custom metrics
 │   ├── middleware/
 │   │   └── auth.js             # JWT verification with DB check
 │   ├── routes/
@@ -124,10 +138,13 @@ PaintCRM/
 │   │   ├── 003_create_leads.js
 │   │   ├── 004_create_events.js
 │   │   └── 005_seed_shades.js
-│   ├── tests/                  # Jest test suite
+│   ├── tests/                  # Jest test suite (setupFilesAfterEnv: setup.js)
 │   │   ├── setup.js
 │   │   ├── auth.test.js
-│   │   └── leads.test.js
+│   │   ├── leads.test.js
+│   │   ├── events.test.js
+│   │   ├── shades.test.js
+│   │   └── dealer.test.js
 │   ├── public/
 │   │   └── login.html          # Standalone auth page
 │   ├── Dockerfile              # Multi-stage production build
@@ -155,28 +172,27 @@ PaintCRM/
 
 ## 3. Frontend Architecture
 
-The frontend is deliberately a **zero-dependency, zero-build-step** single HTML page. No React, no Webpack, no TypeScript. The reasoning: a dealer should be able to open `index.html` directly from a USB stick if needed, and any developer should be able to read and modify the code without toolchain setup.
+The frontend is **vanilla JS** (no React in the main app) bundled with **Vite** for production. Pure algorithms and API helpers live in `src/` as unit-tested ES modules; `script.js` (~3,800 lines) is the module entry point — DOM refs, feature modals, event wiring, and canvas orchestration.
 
-All logic lives in `script.js` (~2750 lines), organized into named sections:
+| Layer | Location | Responsibility |
+|-------|----------|----------------|
+| **Engine modules** | `src/color.js`, `segmentation.js`, `tint.js`, `cost.js` | Colour math, wall masking, recolor, cost estimate — 80 Vitest tests |
+| **Platform modules** | `src/api.js`, `pagination.js`, `utils.js`, `format.js`, `ids.js` | Auth/sync, paging, formatting |
+| **UI shell** | `index.html` | Modals, layout, accessibility |
+| **App wiring** | `script.js` | State, canvas pipeline glue, CRM/commerce/ledger views |
+
+Legacy section map (pre-extraction; algorithms now in `src/`):
 
 | Section | Lines (approx.) | Responsibility |
 |---------|----------------|----------------|
 | Globals & state | 1–140 | DOM refs, `state` object, storage keys |
 | Shade catalog | 141–176 | Fetch, fallback, cost estimate |
-| Color math | 177–251 | `hexToRgb`, `rgbToHsl`, `hslToRgb`, `clamp` |
-| ML subsystem | 252–437 | DeepLab load, segment, fuse, label mapping |
-| Wall detection | 438–855 | Candidate map, flood fill, component scoring |
-| Shade / zone UI | 856–1170 | Suggestions, zone tabs, swatch rendering |
-| Recolor engine | 1171–1278 | `applyTint`, `renderTinted`, `drawPreview` |
-| Canvas interaction | 1279–1520 | Compare slider, brush, pick-wall, add/remove zones |
-| Image upload | 1521–1591 | File read → ImageData → pipeline init |
-| Export | 1565–1591 | PNG + Web Share API |
-| Phase 2 — Leads | 1592–1908 | localStorage CRUD, modals, export package |
-| Phase 2 — Draft | 1909–2045 | Save/restore draft, clear session |
-| Phase 4 — API sync | 2046–2260 | apiRequest, sync functions, auth helpers |
-| Phase 3 — Analytics | 2261–2430 | Event tracking, local dashboard, export |
-| Phase 3 — Settings | 2431–2490 | Dealer settings, branding |
-| Event listeners | 2491–2749 | DOM wiring, startup calls |
+| Canvas + ML | 177–1100 | DeepLab, wall tabs, brush, render pipeline (imports `src/`) |
+| Phase 2 — Leads | 1100–1620 | localStorage CRUD, modals, export package |
+| Phase 4 — API sync | 1620–1890 | sync functions, auth helpers (uses `src/api.js`) |
+| Phase 5–6 — CRM/commerce | 1890–3150 | customers, quotes, orders, inventory, ledger |
+| Phase 3 — Analytics | 3150–3480 | Event tracking, local dashboard |
+| Event listeners | 3630+ | DOM wiring, startup calls |
 
 ### 3.1 State Model
 
@@ -486,24 +502,33 @@ express()
 
 The server listens on `PORT` (default 3001). Serving the frontend from the same origin eliminates CORS entirely.
 
-### 4.2 Authentication — JWT + bcrypt
+### 4.2 Authentication — access + refresh token lifecycle
 
-**Registration:**
-1. Validate `shopName`, `email`, `password` (≥6 chars)
-2. Check `tenants` table for email uniqueness
-3. `bcrypt.hashSync(password, 10)` — 10 salt rounds (~100ms on modern hardware)
-4. Insert tenant row with `uuid()` primary key
-5. Sign JWT: `{ id, email, shopName }`, 30-day TTL
-6. Return `{ token, tenant }`
+Auth uses a **short-lived access token + long-lived rotating refresh token** model (`server/lib/tokens.js`). The access token is a JWT; the refresh token is an opaque random secret persisted server-side (only its SHA-256 hash) in `refresh_tokens`, so sessions can be revoked.
 
-**Login:**
-1. Fetch tenant by email (lowercase normalized)
-2. `bcrypt.compareSync(password, hash)` — constant-time comparison
-3. On success: sign new JWT, return `{ token, tenant }`
+**Password policy:** min 8 chars containing at least one letter and one number (`passwordPolicyError` in `routes/auth.js`).
+
+**Registration / Login:**
+1. Validate input; check email uniqueness (register)
+2. `bcrypt.hashSync(password, 12)` / `bcrypt.compareSync` — 12 salt rounds
+3. `issueSession(tenant)` → signs a `~15m` access JWT **and** inserts a refresh-token row
+4. Return `{ token, refreshToken, expiresIn, tenant }`
+
+**Refresh (`POST /api/auth/refresh`) — rotation + reuse detection:**
+```
+{ refreshToken }
+  → look up SHA-256(refreshToken) in refresh_tokens
+  → if revoked  → REUSE DETECTED: revoke all tenant tokens, 401
+  → if expired  → 401
+  → else: issue a NEW access + refresh pair, mark the old row
+          revoked_at + replaced_by (one-time use), return the pair
+```
+
+**Revocation:** `POST /api/auth/logout` revokes the presented refresh token; `POST /api/auth/logout-all` (auth required) revokes every active session for the tenant.
 
 **Request auth middleware (`requireAuth`):**
 ```
-Authorization: Bearer <jwt>
+Authorization: Bearer <access-jwt>
   → jwt.verify(token, JWT_SECRET)
   → attach req.tenant = { id, email, shopName }
   → next()
@@ -511,7 +536,9 @@ Authorization: Bearer <jwt>
 
 `optionalAuth` follows the same path but calls `next()` on failure (used for `/api/events` so anonymous events can be ingested).
 
-**JWT claims are minimal** (id + email + shopName). All tenant data is fetched fresh from DB when needed via `GET /api/auth/me`.
+**Access token claims are minimal** (id + email + shopName + `type: 'access'`). All tenant data is fetched fresh from DB when needed via `GET /api/auth/me`. TTLs are configurable via `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL_DAYS`.
+
+**Pagination:** all list endpoints accept `?limit=` & `?offset=` (default 50, max 200) via `lib/pagination.js` and return a sibling `pagination: { total, limit, offset, hasMore }` block computed with a `COUNT(*) OVER()` window column.
 
 ### 4.3 Database Schema (PostgreSQL)
 
@@ -598,7 +625,151 @@ CREATE INDEX idx_events_type ON events(event_type);
 CREATE INDEX idx_events_ts ON events(ts);
 CREATE INDEX idx_events_tenant_ts ON events(tenant_id, ts);
 CREATE INDEX idx_events_tenant_type_ts ON events(tenant_id, event_type, ts);
+
+-- Phase 5 (CRM Lite): customers, sites, and preview_sessions link the decision
+-- flow to a durable customer record (migration 006). Leads gain customer_id/site_id.
+
+-- Phase 6 (Commercial Modules): quotes -> orders (migration 007)
+CREATE TABLE quotes (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id  UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  site_id      UUID REFERENCES sites(id) ON DELETE SET NULL,
+  quote_number VARCHAR(32) NOT NULL,          -- per-tenant sequential, e.g. Q-0001
+  status       VARCHAR(32) NOT NULL DEFAULT 'draft', -- draft|sent|accepted|rejected|converted
+  currency     VARCHAR(8)  NOT NULL DEFAULT 'INR',
+  notes        TEXT DEFAULT '',
+  discount     NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_rate     NUMERIC(5,2)  NOT NULL DEFAULT 0,     -- percent
+  subtotal     NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_amount   NUMERIC(12,2) NOT NULL DEFAULT 0,
+  total        NUMERIC(12,2) NOT NULL DEFAULT 0,
+  valid_until  DATE,
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (tenant_id, quote_number)
+);
+CREATE INDEX idx_quotes_tenant ON quotes(tenant_id);
+CREATE INDEX idx_quotes_tenant_customer ON quotes(tenant_id, customer_id);
+CREATE INDEX idx_quotes_tenant_status ON quotes(tenant_id, status);
+
+CREATE TABLE quote_items (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  quote_id    UUID NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+  shade_id    VARCHAR(64) DEFAULT '',   -- soft link to shades.id (no FK; offline-safe)
+  description VARCHAR(255) NOT NULL,
+  brand       VARCHAR(120) DEFAULT '',
+  unit        VARCHAR(32) DEFAULT 'litre',
+  quantity    NUMERIC(12,2) NOT NULL DEFAULT 1,
+  unit_price  NUMERIC(12,2) NOT NULL DEFAULT 0,
+  line_total  NUMERIC(12,2) NOT NULL DEFAULT 0,  -- always derived server-side
+  sort_order  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_quote_items_quote ON quote_items(quote_id);
+
+-- orders + order_items mirror quotes/quote_items; an order snapshots the quote at
+-- conversion time (quote_id links back, ON DELETE SET NULL). Same unique/index layout.
+CREATE TABLE orders (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id  UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  site_id      UUID REFERENCES sites(id) ON DELETE SET NULL,
+  quote_id     UUID REFERENCES quotes(id) ON DELETE SET NULL,
+  order_number VARCHAR(32) NOT NULL,          -- per-tenant sequential, e.g. O-0001
+  status       VARCHAR(32) NOT NULL DEFAULT 'pending', -- pending|confirmed|fulfilled|cancelled
+  currency     VARCHAR(8)  NOT NULL DEFAULT 'INR',
+  notes        TEXT DEFAULT '',
+  discount     NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_rate     NUMERIC(5,2)  NOT NULL DEFAULT 0,
+  subtotal     NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tax_amount   NUMERIC(12,2) NOT NULL DEFAULT 0,
+  total        NUMERIC(12,2) NOT NULL DEFAULT 0,
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (tenant_id, order_number)
+);
+CREATE INDEX idx_orders_tenant ON orders(tenant_id);
+CREATE INDEX idx_orders_tenant_customer ON orders(tenant_id, customer_id);
+CREATE INDEX idx_orders_tenant_status ON orders(tenant_id, status);
+CREATE INDEX idx_orders_quote ON orders(quote_id);
+-- order_items: identical columns to quote_items with order_id FK + idx_order_items_order
+
+-- Phase 6 (Inventory): stock items + append-only movement log (migration 008)
+CREATE TABLE inventory_items (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  sku           VARCHAR(64) NOT NULL DEFAULT '',   -- optional; unique per tenant when set
+  name          VARCHAR(255) NOT NULL,
+  brand         VARCHAR(120) DEFAULT '',
+  shade_id      VARCHAR(64) DEFAULT '',            -- soft link to shades.id
+  unit          VARCHAR(32) NOT NULL DEFAULT 'litre',
+  quantity      NUMERIC(12,2) NOT NULL DEFAULT 0,  -- on hand; only moves via /adjust
+  reorder_level NUMERIC(12,2) NOT NULL DEFAULT 0,
+  unit_price    NUMERIC(12,2) NOT NULL DEFAULT 0,  -- selling price
+  cost_price    NUMERIC(12,2) NOT NULL DEFAULT 0,
+  notes         TEXT DEFAULT '',
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_inventory_tenant ON inventory_items(tenant_id);
+CREATE INDEX idx_inventory_tenant_name ON inventory_items(tenant_id, name);
+CREATE UNIQUE INDEX inventory_items_tenant_sku_unique
+  ON inventory_items(tenant_id, sku) WHERE sku <> '';  -- partial: blanks allowed
+
+CREATE TABLE inventory_movements (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  item_id       UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  delta         NUMERIC(12,2) NOT NULL,   -- + received / - issued
+  reason        VARCHAR(255) DEFAULT '',
+  balance_after NUMERIC(12,2) NOT NULL,   -- running balance snapshot
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_inv_moves_item ON inventory_movements(item_id);
+CREATE INDEX idx_inv_moves_tenant_ts ON inventory_movements(tenant_id, created_at);
+
+-- Phase 6 (Credit Ledger): per-customer account + reminder audit log (migration 009)
+CREATE TABLE ledger_entries (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id     UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  entry_type      VARCHAR(16) NOT NULL,               -- 'debit' | 'credit' (CHECK)
+  amount          NUMERIC(12,2) NOT NULL,             -- always positive (CHECK amount >= 0)
+  source          VARCHAR(32) NOT NULL DEFAULT 'manual', -- order|payment|manual|adjustment|reversal
+  reference_id    UUID,                               -- soft link to an order (survives deletion)
+  reference_label VARCHAR(64) NOT NULL DEFAULT '',    -- e.g. 'O-0001'
+  note            TEXT DEFAULT '',
+  due_date        DATE,                               -- for debits; drives overdue flags
+  balance_after   NUMERIC(12,2) NOT NULL,             -- running per-customer balance snapshot
+  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_ledger_tenant ON ledger_entries(tenant_id);
+CREATE INDEX idx_ledger_tenant_cust_ts ON ledger_entries(tenant_id, customer_id, created_at);
+CREATE INDEX idx_ledger_reference ON ledger_entries(reference_id);
+
+CREATE TABLE payment_reminders (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id         UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  channel             VARCHAR(32) NOT NULL DEFAULT 'manual', -- manual|call|sms|whatsapp|email
+  note                TEXT DEFAULT '',
+  balance_at_reminder NUMERIC(12,2) NOT NULL DEFAULT 0,      -- outstanding balance snapshot
+  created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_reminders_tenant_cust_ts ON payment_reminders(tenant_id, customer_id, created_at);
 ```
+
+**Stock status** is derived (never stored): `out_of_stock` when `quantity <= 0`,
+`low_stock` when `reorder_level > 0 AND quantity <= reorder_level`, else `in_stock`.
+
+**Credit balance** is a customer's amount owed: `SUM(debit) - SUM(credit)` (positive =
+owes, negative = advance). It is never stored on the customer — each ledger row snapshots
+the running `balance_after`, computed under a per-customer row lock (`SELECT … FOR UPDATE`)
+so concurrent posts stay consistent. A customer is **overdue** when the balance is positive
+and a dated debit is past due. Order totals post a `source='order'` debit inside the order
+transaction; deleting an order writes a compensating `source='reversal'` credit for the net
+outstanding amount so balances remain correct without mutating history.
 
 ### 4.4 API Route Reference
 
@@ -649,6 +820,80 @@ Search is a four-column LIKE across `name`, `brand`, `collection`, `color_family
 
 Valid `eventType` values: `session_start`, `shade_selected`, `share_exported`, `contact_opened`, `contact_saved`, `page_load`.
 
+#### Quotes (`/api/quotes`) — Phase 6
+
+| Method | Path | Auth | Body / Params | Response |
+|--------|------|------|--------------|----------|
+| GET | `/` | ✓ | `?customerId=&status=` | `{quotes[]}` (with `itemCount`, no items) |
+| POST | `/` | ✓ | `{customerId, siteId?, items[], taxRate?, discount?, notes?, validUntil?, status?}` | `{quote}` — 201 |
+| GET | `/:id` | ✓ | — | `{quote}` (with `items[]`) |
+| PUT | `/:id` | ✓ | same as POST (header + full item replace) | `{quote}` |
+| PATCH | `/:id/status` | ✓ | `{status}` (draft/sent/accepted/rejected) | `{quote}` |
+| POST | `/:id/convert` | ✓ | — | `{order}` — 201; 409 if already converted |
+| DELETE | `/:id` | ✓ | — | `{ok: true}` |
+
+Each `items[]` entry: `{description, quantity, unitPrice, brand?, unit?, shadeId?, sortOrder?}`.
+
+#### Orders (`/api/orders`) — Phase 6
+
+| Method | Path | Auth | Body / Params | Response |
+|--------|------|------|--------------|----------|
+| GET | `/` | ✓ | `?customerId=&status=` | `{orders[]}` (with `itemCount`) |
+| POST | `/` | ✓ | `{customerId, siteId?, items[], taxRate?, discount?, notes?, status?}` | `{order}` — 201 |
+| GET | `/:id` | ✓ | — | `{order}` (with `items[]`) |
+| PATCH | `/:id/status` | ✓ | `{status}` (pending/confirmed/fulfilled/cancelled) | `{order}` |
+| DELETE | `/:id` | ✓ | — | `{ok: true}` |
+
+**Totals math (`lib/quotes.js`, authoritative — client values ignored):**
+
+```
+line_total   = round2(quantity * unit_price)          # per item
+subtotal     = round2(Σ line_total)
+discountBase = max(0, round2(subtotal - discount))
+tax_amount   = round2(discountBase * tax_rate / 100)
+total        = round2(discountBase + tax_amount)
+```
+
+Creation, full update, and conversion run inside `withTransaction`. Document numbers
+are generated per-tenant as `prefix + max(numeric suffix so far)+1`, zero-padded to 4
+digits (resilient to deletions), and guarded by a `UNIQUE (tenant_id, number)` constraint.
+Converting a quote snapshots its items + totals into a new order and sets the quote to
+`converted` (thereafter read-only).
+
+#### Inventory (`/api/inventory`) — Phase 6
+
+| Method | Path | Auth | Body / Params | Response |
+|--------|------|------|--------------|----------|
+| GET | `/` | ✓ | `?q=<search>&status=<in_stock\|low_stock\|out_of_stock>` | `{items[]}` |
+| GET | `/summary` | ✓ | — | `{summary:{total,inStock,lowStock,outOfStock,stockValue}}` |
+| POST | `/` | ✓ | `{name, sku?, brand?, shadeId?, unit?, quantity?, reorderLevel?, unitPrice?, costPrice?, notes?}` | `{item}` — 201; 409 on duplicate SKU |
+| GET | `/:id` | ✓ | — | `{item}` (with `movements[]`) |
+| PUT | `/:id` | ✓ | metadata (quantity ignored — use `/adjust`) | `{item}` |
+| POST | `/:id/adjust` | ✓ | `{delta, reason?}` | `{item}`; 400 if it would go negative |
+| DELETE | `/:id` | ✓ | — | `{ok: true}` |
+
+On-hand quantity changes **only** through `POST /:id/adjust`, which runs in a transaction
+(`SELECT … FOR UPDATE`), rejects a resulting negative balance, and writes an
+`inventory_movements` row with the running `balance_after`. Item creation records an
+"Opening stock" movement when the opening quantity is non-zero.
+
+#### Credit Ledger (`/api/ledger`) — Phase 6
+
+| Method | Path | Auth | Body / Params | Response |
+|--------|------|------|--------------|----------|
+| GET | `/summary` | ✓ | — | `{summary:{receivable,advances,debtors,overdueCustomers,overdueAmount}}` |
+| GET | `/customers` | ✓ | `?overdue=true&q=<search>` | `{customers[]}` — outstanding balances, overdue sorted first |
+| GET | `/customers/:id` | ✓ | — | `{ledger:{balance, overdue, entries[], reminders[], …}}` |
+| POST | `/customers/:id/entries` | ✓ | `{entryType:'debit'\|'credit', amount, note?, dueDate?, source?}` | `{entry, ledger}` — 201 |
+| POST | `/customers/:id/reminders` | ✓ | `{channel?, note?}` | `{reminder, balance}` — 201 |
+
+Ledger writes run in a transaction that locks the customer row (`SELECT … FOR UPDATE`),
+recomputes the balance from `SUM(debit) - SUM(credit)`, and appends a row with the new
+`balance_after` (`lib/ledger.js#postEntry`). Order creation/conversion posts a `source='order'`
+debit via `postOrderDebit` inside the order transaction; order deletion posts a
+`source='reversal'` credit via `reverseOrderPosting`. Manual entries are restricted to the
+`manual` / `payment` / `adjustment` sources; `order` / `reversal` are system-only.
+
 ### 4.5 Funnel Analytics Query Design
 
 `GET /api/events/summary` runs five queries against the `events` table and returns a single JSON object:
@@ -680,13 +925,13 @@ first_shade AS (
   WHERE tenant_id=? AND event_type='shade_selected' GROUP BY session_id
 )
 SELECT AVG(
-  CAST((julianday(fs.shade_ts) - julianday(ss.ts)) * 86400000 AS INTEGER)
+  EXTRACT(EPOCH FROM (fs.shade_ts - ss.ts)) * 1000
 ) as avg_ms
 FROM session_start ss JOIN first_shade fs ON ss.session_id = fs.session_id
 WHERE ss.ts >= datetime('now', '-30 days');
 ```
 
-SQLite's `julianday()` converts ISO timestamps to floating-point days; multiplying by 86400000 converts to milliseconds.
+PostgreSQL's `EXTRACT(EPOCH FROM interval)` returns seconds; multiplying by 1000 converts to milliseconds.
 
 ---
 
@@ -942,8 +1187,8 @@ Intersection is preferred: DeepLab's "wall" semantic label is precise, and the h
 | `localStorage` | `paintcrm_analytics_v1` | JSON array of events | 600-event cap | Oldest events dropped |
 | `localStorage` | `paintcrm_dealer_v1` | `{shopName, dealerName, phone}` | ~100 bytes | Settings form |
 | `localStorage` | `paintcrm_api_token_v1` | JWT string | ~200 bytes | Logout / expired |
-| Server — SQLite | `leads` table | Full lead rows + base64 snapshot | Disk | Manual delete |
-| Server — SQLite | `events` table | Funnel events (append-only) | Disk | No eviction yet |
+| Server — PostgreSQL | `leads` table | Full lead rows + base64 snapshot | Disk | Manual delete |
+| Server — PostgreSQL | `events` table | Funnel events (append-only) | Disk | No eviction yet |
 
 **Graceful degradation sequence:**
 1. No server: app works fully via localStorage alone.
@@ -967,7 +1212,7 @@ Intersection is preferred: DeepLab's "wall" semantic label is precise, and the h
 | CORS | Configurable via `ALLOWED_ORIGINS` env var; defaults to permissive only in development |
 | Rate limiting | `express-rate-limit`: 100 req/15min per IP; auth endpoints stricter: 10 req/hour |
 | Security headers | Helmet.js: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
-| Input validation | Zod schemas for request validation; eventType whitelisted against `Set` |
+| Input validation | Manual field validation in each route; `eventType` whitelisted against a `Set` |
 | XSS protection | CSP directives restrict script sources; user content (snapshots) stored as base64, not rendered as HTML |
 | Logging | Pino structured logging with automatic PII redaction (passwords, tokens) |
 | Container security | Multi-stage Docker build; runs as non-root user (nodejs:1001) |
@@ -1031,7 +1276,7 @@ Intersection is preferred: DeepLab's "wall" semantic label is precise, and the h
 
 ### Backend
 
-All SQLite operations use prepared statements executed synchronously on the main thread (Node's event loop is not blocked because better-sqlite3's synchronous driver is very fast for single-writer workloads). Typical response times:
+All PostgreSQL queries use parameterized statements via `pg` pool. Typical response times:
 
 | Route | Typical latency |
 |-------|----------------|
@@ -1060,15 +1305,20 @@ All SQLite operations use prepared statements executed synchronously on the main
 
 **Dockerfile Strategy (Multi-stage build):**
 ```
-Stage 1 (builder): npm ci --only=production
-Stage 2 (production): Alpine Linux, non-root user, health checks
+Stage 1 (frontend): node:20-alpine — npm ci && vite build → paint-preview-app/dist
+Stage 2 (builder):  npm ci --only=production (server deps)
+Stage 3 (production): Alpine Linux, non-root user, health checks;
+                      copies server code + the built frontend dist
 ```
+The server serves the built bundle: `resolveFrontendDir()` prefers `FRONTEND_DIR`, then `paint-preview-app/dist`, then the raw source (zero-build local dev).
 
 **Security hardening:**
 - Runs as `nodejs` user (UID 1001), not root
 - `dumb-init` for proper signal handling (PID 1 problem)
 - Health check: `curl -f http://localhost:3001/api/health`
 - Read-only root filesystem where possible
+
+**Managed deploy (Fly.io):** `fly.toml` at the repo root builds from `server/Dockerfile`, runs migrations on container start, and exposes the health check. `DB_SSL` toggles Postgres TLS (`false` for Fly's private-network Postgres; on by default for managed providers). CI deploys to staging → production via the `superfly/flyctl-actions` action, gated on the `FLY_API_TOKEN` secret.
 
 **docker-compose.yml orchestration:**
 ```yaml
@@ -1151,11 +1401,11 @@ Pipeline Stages:
 The current architecture is intentionally single-server, single-DB. The scaling path follows the phase gates in the product plan:
 
 ```
-Phase 4 (now): SQLite on a single VPS
+Phase 4 (now): PostgreSQL on a single VPS / Docker host
        │  when: > 500 dealers, > 1M events
        ▼
 Phase 5: Migrate to PostgreSQL
-  - same SQL syntax; change `better-sqlite3` import to `pg` pool
+  - add read replicas; route SELECT queries to replica pool
   - add connection pooling (pg-pool)
   - move snapshot storage to S3 / object storage (strip base64 from DB)
        │  when: multi-region or > 50k req/day
@@ -1267,15 +1517,15 @@ export default function () {
 | 1 | Done | Canvas engine, masking pipeline, HSL recolor, ML integration |
 | 2 | Done | localStorage persistence, lead CRUD, draft save, shade catalog |
 | 3 | Done | Analytics event system, local dashboard, dealer branding |
-| 4 | **Done (Enterprise)** | PostgreSQL backend with connection pooling, JWT auth, Docker containerization, CI/CD, monitoring stack |
-| 5 | In progress | Customer CRM (CRUD), site/project model, preview session linked to customer timeline |
-| 6 | Planned | Quote → order flow, inventory stock status, credit ledger, payment reminders |
+| 4 | **Done** | PostgreSQL backend with connection pooling, JWT auth, Docker containerization, CI/CD, monitoring stack |
+| 5 | **Done** | Customer CRM (CRUD), site/project model, preview session linked to customer timeline |
+| 6 | **In progress** | Quote → order flow, inventory/stock status, and credit ledger + payment reminders (done): commerce + inventory + ledger schema, server-computed totals, transactional conversion, auditable stock movements, append-only per-customer account with auto-posted order totals and overdue reminders |
 | 7 | Planned | AI palette recommendations (style/mood/season), dealer assistant prompts (LLM) |
 | 8 | Future | Contractor assignment, customer-facing app, marketplace mechanics |
 
 **Phase 4 Enterprise Hardening (completed):**
-- Database: SQLite → PostgreSQL with migrations, connection pooling, GIN indexes
-- Security: Added Helmet, rate limiting, improved bcrypt rounds (10→12)
+- Database: PostgreSQL with migrations (node-pg-migrate), connection pooling, GIN indexes
+- Security: Helmet, rate limiting (Redis-backed when REDIS_URL set), bcrypt 12 rounds, JWT startup guard
 - Observability: Prometheus metrics, Grafana dashboards, structured logging (Pino)
 - DevOps: Docker multi-stage builds, GitHub Actions CI/CD, vulnerability scanning
 - Testing: Jest test suite with 70% coverage threshold, PostgreSQL test database
@@ -1285,4 +1535,4 @@ export default function () {
 
 ---
 
-*Last updated: Jun 7, 2026 — Phase 4 complete*
+*Last updated: Jul 4, 2026 — Phase 6 (quote → order, inventory, credit ledger + reminders) plus scale hardening: paginated APIs, refresh-token auth lifecycle, Vite-bundled modular frontend with Vitest tests, and Fly.io deploy*

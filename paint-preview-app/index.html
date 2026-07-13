@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Paint Preview App</title>
+    <!-- Auth gate: the app opens on the login page unless there is a session or
+         the visitor chose "continue without an account". Runs before anything
+         else so unauthenticated visitors are redirected immediately. -->
+    <script>
+      (function () {
+        try {
+          var hasToken = localStorage.getItem("paintcrm_api_token_v1");
+          var isGuest = localStorage.getItem("paintcrm_guest_v1") === "1";
+          if (!hasToken && !isGuest) {
+            var dest = location.pathname + location.search + location.hash;
+            location.replace("/login?redirect=" + encodeURIComponent(dest));
+          }
+        } catch (e) {
+          /* localStorage blocked — fall through to the app */
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet" />
@@ -25,6 +42,10 @@
             <button id="exportBtn" class="button ghost" disabled>Share / Export</button>
             <button id="contactBtn" class="button primary" disabled>Contact Dealer</button>
             <button id="leadsBtn" class="button ghost" disabled>Leads <span id="leadsCount">0</span></button>
+            <button id="customersBtn" class="button ghost" title="CRM — sign in required">Customers</button>
+            <button id="quotesBtn" class="button ghost" title="Quotes &amp; Orders — sign in required">Quotes</button>
+            <button id="inventoryBtn" class="button ghost" title="Inventory — sign in required">Inventory</button>
+            <button id="ledgerBtn" class="button ghost" title="Credit ledger &amp; reminders — sign in required">Ledger</button>
             <button id="settingsBtn" class="button ghost">Settings</button>
             <button id="restoreDraftBtn" class="button ghost" style="display:none">Restore draft</button>
             <button id="clearSessionBtn" class="button ghost" style="display:none">New session</button>
@@ -225,7 +246,7 @@
             <h4 style="font-size:0.82rem;margin:0;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Server Sync</h4>
             <span id="serverSyncStatus" class="sync-status">Not connected</span>
           </div>
-          <p class="muted tiny" style="margin-bottom:14px;">Sign in to sync leads and analytics to the PaintCRM backend. Works offline without an account.</p>
+          <p class="muted tiny" style="margin-bottom:14px;">Sign in to sync leads and analytics to the PaintCRM backend. Works offline without an account. <a href="/login" style="color:var(--accent);">Open login page</a></p>
 
           <!-- Logged-in state -->
           <div id="serverLoggedInSection" class="hidden">
@@ -286,6 +307,18 @@
             <label class="field full">
               <span>Notes (optional)</span>
               <textarea id="leadNotes" rows="2" placeholder="Wants low-VOC, 2BR apartment, follow up this week"></textarea>
+            </label>
+            <label class="field full crm-link-field hidden" id="leadCustomerField">
+              <span>Link to customer (optional)</span>
+              <select id="leadCustomerSelect">
+                <option value="">New customer (auto-create from phone)</option>
+              </select>
+            </label>
+            <label class="field full crm-link-field hidden" id="leadSiteField">
+              <span>Site / project (optional)</span>
+              <select id="leadSiteSelect">
+                <option value="">No site selected</option>
+              </select>
             </label>
           </div>
 
@@ -353,8 +386,389 @@
       </div>
     </div>
 
+    <!-- Phase 5: CRM Lite -->
+    <div id="customersModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="customersTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="customersTitle">Customers</h3>
+          <button id="closeCustomersBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="customersSignInPrompt" class="muted" style="padding:12px;display:none;">
+          Sign in via Settings → Server Sync to use CRM. Leads still work offline.
+        </div>
+
+        <div id="customersPanel">
+          <div class="crm-toolbar">
+            <input id="customerSearchInput" type="search" placeholder="Search name or phone…" class="crm-search" />
+            <button type="button" id="newCustomerBtn" class="button tiny primary">+ New</button>
+          </div>
+          <div id="customersList" class="leads-list"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="closeCustomers2Btn" class="button ghost">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="customerDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="customerDetailTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="customerDetailTitle">Customer</h3>
+          <button id="closeCustomerDetailBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="customerDetailBody" class="lead-detail-body"></div>
+
+        <div class="modal-actions">
+          <button id="deleteCustomerBtn" class="button ghost danger">Delete</button>
+          <button id="editCustomerBtn" class="button ghost">Edit</button>
+          <button id="addSiteBtn" class="button ghost">+ Add Site</button>
+          <button id="closeCustomerDetail2Btn" class="button primary">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="newCustomerModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="newCustomerTitle">
+      <div class="modal-content">
+        <header class="modal-header">
+          <h3 id="newCustomerTitle">New Customer</h3>
+          <button id="closeNewCustomerBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+        <form id="newCustomerForm">
+          <div class="form-grid">
+            <label class="field">
+              <span>Name <span class="req">*</span></span>
+              <input id="newCustomerName" type="text" required />
+            </label>
+            <label class="field">
+              <span>Phone <span class="req">*</span></span>
+              <input id="newCustomerPhone" type="tel" required />
+            </label>
+            <label class="field">
+              <span>Email</span>
+              <input id="newCustomerEmail" type="email" />
+            </label>
+            <label class="field">
+              <span>Type</span>
+              <select id="newCustomerType">
+                <option value="end_customer">End customer</option>
+                <option value="contractor">Contractor</option>
+              </select>
+            </label>
+            <label class="field full">
+              <span>Notes</span>
+              <textarea id="newCustomerNotes" rows="2"></textarea>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="cancelNewCustomerBtn" class="button ghost">Cancel</button>
+            <button type="submit" id="saveCustomerBtn" class="button primary">Save Customer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="siteModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="siteTitle">
+      <div class="modal-content">
+        <header class="modal-header">
+          <h3 id="siteTitle">New Site / Project</h3>
+          <button id="closeSiteBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+        <form id="siteForm">
+          <div class="form-grid">
+            <label class="field full">
+              <span>Site / project name <span class="req">*</span></span>
+              <input id="siteName" type="text" required placeholder="2BR Apartment — Kochi" />
+            </label>
+            <label class="field full">
+              <span>Address</span>
+              <input id="siteAddress" type="text" placeholder="Marine Drive, Kochi" />
+            </label>
+            <label class="field">
+              <span>Status</span>
+              <select id="siteStatus">
+                <option value="active">Active</option>
+                <option value="on_hold">On hold</option>
+                <option value="completed">Completed</option>
+              </select>
+            </label>
+            <label class="field full">
+              <span>Notes</span>
+              <textarea id="siteNotes" rows="2"></textarea>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="cancelSiteBtn" class="button ghost">Cancel</button>
+            <button type="submit" class="button primary">Save Site</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Phase 6: Commercial Modules — Quotes & Orders -->
+    <div id="quotesModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="quotesTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="quotesTitle">Quotes &amp; Orders</h3>
+          <button id="closeQuotesBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="quotesSignInPrompt" class="muted" style="padding:12px;display:none;">
+          Sign in via Settings → Server Sync to create quotes and convert them to orders.
+        </div>
+
+        <div id="quotesPanel">
+          <div class="modal-tabs">
+            <button class="modal-tab active" id="quotesTabBtn">Quotes</button>
+            <button class="modal-tab" id="ordersTabBtn">Orders</button>
+          </div>
+
+          <div class="crm-toolbar">
+            <select id="docStatusFilter" class="crm-search"></select>
+            <button type="button" id="newQuoteBtn" class="button tiny primary">+ New Quote</button>
+          </div>
+
+          <div id="docList" class="leads-list"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="closeQuotes2Btn" class="button ghost">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="quoteFormModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="quoteFormTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="quoteFormTitle">New Quote</h3>
+          <button id="closeQuoteFormBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <form id="quoteForm">
+          <div class="form-grid">
+            <label class="field">
+              <span>Customer <span class="req">*</span></span>
+              <select id="quoteCustomerSelect" required></select>
+            </label>
+            <label class="field">
+              <span>Site / project</span>
+              <select id="quoteSiteSelect"><option value="">No site</option></select>
+            </label>
+          </div>
+
+          <h4 class="section-label">Line items</h4>
+          <div class="quote-items-head">
+            <span>Description</span>
+            <span>Qty</span>
+            <span>Unit ₹</span>
+            <span>Total</span>
+            <span></span>
+          </div>
+          <div id="quoteItemsList" class="quote-items"></div>
+
+          <div class="quote-add-row">
+            <select id="quoteShadePicker" class="crm-search">
+              <option value="">Add a shade from the catalog…</option>
+            </select>
+            <button type="button" id="addQuoteItemBtn" class="button tiny ghost">+ Blank line</button>
+          </div>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>Discount (₹)</span>
+              <input id="quoteDiscount" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Tax rate (%)</span>
+              <input id="quoteTaxRate" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field full">
+              <span>Notes</span>
+              <textarea id="quoteNotes" rows="2" placeholder="Payment terms, validity, etc."></textarea>
+            </label>
+          </div>
+
+          <div id="quoteTotals" class="quote-totals"></div>
+          <p id="quoteFormError" class="form-error"></p>
+
+          <div class="modal-actions">
+            <button type="button" id="cancelQuoteFormBtn" class="button ghost">Cancel</button>
+            <button type="submit" id="saveQuoteBtn" class="button primary">Save Quote</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="docDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="docDetailTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="docDetailTitle">Quote</h3>
+          <button id="closeDocDetailBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="docDetailBody" class="lead-detail-body"></div>
+
+        <div class="modal-actions" id="docDetailActions"></div>
+      </div>
+    </div>
+
+    <!-- Phase 6: Inventory -->
+    <div id="inventoryModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="inventoryTitle">Inventory</h3>
+          <button id="closeInventoryBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="inventorySignInPrompt" class="muted" style="padding:12px;display:none;">
+          Sign in via Settings → Server Sync to track stock and reorder levels.
+        </div>
+
+        <div id="inventoryPanel">
+          <div id="inventorySummary" class="inv-summary"></div>
+          <div class="crm-toolbar">
+            <input id="inventorySearchInput" type="search" placeholder="Search name, brand, or SKU…" class="crm-search" />
+            <select id="inventoryStatusFilter" class="crm-search" style="flex:0 0 auto;">
+              <option value="">All stock</option>
+              <option value="in_stock">In stock</option>
+              <option value="low_stock">Low stock</option>
+              <option value="out_of_stock">Out of stock</option>
+            </select>
+            <button type="button" id="newInventoryBtn" class="button tiny primary">+ New Item</button>
+          </div>
+          <div id="inventoryList" class="leads-list"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="closeInventory2Btn" class="button ghost">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="inventoryFormModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryFormTitle">
+      <div class="modal-content">
+        <header class="modal-header">
+          <h3 id="inventoryFormTitle">New Item</h3>
+          <button id="closeInventoryFormBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+        <form id="inventoryForm">
+          <div class="form-grid">
+            <label class="field full">
+              <span>Product name <span class="req">*</span></span>
+              <input id="invName" type="text" required placeholder="Royale Luxury Emulsion 10L" />
+            </label>
+            <label class="field">
+              <span>Brand</span>
+              <input id="invBrand" type="text" placeholder="Asian Paints" />
+            </label>
+            <label class="field">
+              <span>SKU</span>
+              <input id="invSku" type="text" placeholder="Optional" />
+            </label>
+            <label class="field">
+              <span>Unit</span>
+              <input id="invUnit" type="text" value="litre" />
+            </label>
+            <label class="field" id="invQtyField">
+              <span>Opening quantity</span>
+              <input id="invQuantity" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Reorder level</span>
+              <input id="invReorder" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Selling price (₹)</span>
+              <input id="invUnitPrice" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field">
+              <span>Cost price (₹)</span>
+              <input id="invCostPrice" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <label class="field full">
+              <span>Link to catalog shade (optional)</span>
+              <select id="invShadePicker"><option value="">No linked shade</option></select>
+            </label>
+            <label class="field full">
+              <span>Notes</span>
+              <textarea id="invNotes" rows="2"></textarea>
+            </label>
+          </div>
+          <p id="inventoryFormError" class="form-error"></p>
+          <div class="modal-actions">
+            <button type="button" id="cancelInventoryFormBtn" class="button ghost">Cancel</button>
+            <button type="submit" id="saveInventoryBtn" class="button primary">Save Item</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="inventoryDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryDetailTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="inventoryDetailTitle">Item</h3>
+          <button id="closeInventoryDetailBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="inventoryDetailBody" class="lead-detail-body"></div>
+
+        <div class="modal-actions">
+          <button id="deleteInventoryBtn" class="button ghost danger">Delete</button>
+          <button id="editInventoryBtn" class="button ghost">Edit</button>
+          <button id="closeInventoryDetail2Btn" class="button primary">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 6: Credit Ledger & Payment Reminders -->
+    <div id="ledgerModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ledgerTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="ledgerTitle">Credit Ledger</h3>
+          <button id="closeLedgerBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="ledgerSignInPrompt" class="muted" style="padding:12px;display:none;">
+          Sign in via Settings → Server Sync to track customer credit, payments, and reminders.
+        </div>
+
+        <div id="ledgerPanel">
+          <div id="ledgerSummary" class="inv-summary"></div>
+          <div class="crm-toolbar">
+            <input id="ledgerSearchInput" type="search" placeholder="Search customer name or phone…" class="crm-search" />
+            <select id="ledgerFilter" class="crm-search" style="flex:0 0 auto;">
+              <option value="">Everyone who owes</option>
+              <option value="overdue">Overdue only</option>
+            </select>
+          </div>
+          <div id="ledgerList" class="leads-list"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="closeLedger2Btn" class="button ghost">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="ledgerDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ledgerDetailTitle">
+      <div class="modal-content wide">
+        <header class="modal-header">
+          <h3 id="ledgerDetailTitle">Account</h3>
+          <button id="closeLedgerDetailBtn" class="button tiny ghost" aria-label="Close">Close</button>
+        </header>
+
+        <div id="ledgerDetailBody" class="lead-detail-body"></div>
+
+        <div class="modal-actions">
+          <button id="closeLedgerDetail2Btn" class="button primary">Done</button>
+        </div>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.19.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/deeplab@0.2.1/dist/deeplab.min.js"></script>
-    <script src="script.js"></script>
+    <script type="module" src="./script.js"></script>
   </body>
 </html>

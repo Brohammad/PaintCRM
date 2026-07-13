@@ -7,31 +7,20 @@ Date: 27 March 2026
 - Expansion principle: Only add new modules after measurable proof from the current module.
 
 2) Current Build Status
-Completed in the app (Phase 1):
-- Room photo upload
-- Suggested shades (top 5)
-- Live recolor preview
-- Before/after toggle
-- Compare mode
-- Export preview
-- Smart wall masking (software)
-- Natural recolor mode (HSL)
-- Tap-to-lock wall selection
-- Multi-wall tabs with independent selection and color
-- Brush mask mode with brush size and clear/reset + erase + undo/redo
-- Edge feathering
-- Dark and high-contrast test shades (including black/charcoal)
-- E2E test coverage for core flows
+Phases 0–4 are complete. Next up: Phase 5 (CRM Lite) after pilot dealers show repeat backend usage.
 
-Phase 2 in progress:
-- Contact Dealer capture flow (name, phone, selected shades, preview snapshot)
-- Local (browser) leads inbox for captured leads
-- Lead package export (snapshot + metadata)
-- Basic session draft save/restore for preview workspace
+Completed (Phases 1–3):
+- Full decision engine, conversion layer, and pilot validation analytics (see Phase Roadmap below)
 
-Validation objective now:
-- Complete a Contact Dealer capture from a finished preview.
-- Leads are persisted locally and exportable as a package.
+Phase 4 complete (Jul 2026):
+- PostgreSQL backend with auth, leads, shades, dealer profile, funnel events
+- End-to-end frontend sync: leads, snapshots, dealer profile, server analytics, shade catalog
+- Docker, CI/CD, monitoring stack (Prometheus/Grafana)
+
+Current validation objective:
+- Run pilot with 3–5 dealers on the full stack (signed in, server sync enabled)
+- Measure repeat sessions and contact/share rates via server analytics
+- Gate Phase 5 (CRM Lite) on evidence of repeated real usage
 
 3) Product Scope Guardrails
 Build now:
@@ -69,7 +58,7 @@ Phase 2 - Conversion Layer (Done)
 - Basic cost estimator (litres + INR estimate for standard room, 2 coats)
 - localStorage safety guards (graceful fallback when storage full)
 
-Phase 3 - Pilot Validation (IN PROGRESS — started Jun 7 2026)
+Phase 3 - Pilot Validation (Done — infra complete; dealer pilot ongoing)
 - Test with 3 to 5 local dealers
 - Measure:
   - Time to customer decision
@@ -85,39 +74,103 @@ Phase 3 - Pilot Validation (IN PROGRESS — started Jun 7 2026)
   - Settings modal: configure dealer name/shop/phone, export or clear analytics
   - Dealer info embedded in all exported lead JSON packages
 
-Phase 4 - Backend Foundation (IN PROGRESS — started Jun 7 2026)
+Phase 4 - Backend Foundation (Done — Jul 2026)
 - Basic auth and tenant model ✓
 - Lead APIs and preview metadata storage ✓
 - Shade and dealer catalog APIs ✓
 - Event tracking for funnel analytics ✓
-- Phase 4 backend built (server/ — Node.js + Express + SQLite):
+- Phase 4 backend built (server/ — Node.js + Express + PostgreSQL):
   - POST /api/auth/register + POST /api/auth/login + GET /api/auth/me (JWT, 30-day token, bcrypt)
   - Tenant model: shop_name, dealer_name, phone, email — multi-tenant scoped
-  - GET/POST/DELETE /api/leads — per-tenant lead CRUD with snapshot storage
+  - GET/POST/DELETE /api/leads + GET /api/leads/:id — per-tenant lead CRUD with snapshot storage
   - GET /api/shades — catalog API seeded from shades.json (63 shades), searchable by ?q=
   - GET/PUT /api/dealer — dealer profile API
   - POST /api/events — funnel event ingestion (session_start, shade_selected, share_exported, contact_opened, contact_saved)
   - GET /api/events/summary — 30-day funnel metrics: sessions, contact rate, share rate, avg decision time, 7-day bar data
   - Express also serves paint-preview-app/ as static files (run one port: 3001)
+  - Docker Compose stack: app + Postgres + Redis + Prometheus + Grafana
+  - GitHub Actions CI: lint, test, Docker build
 - Frontend API sync layer (graceful degradation — full offline mode preserved):
   - apiRequest() helper with Bearer auth header
-  - syncLeadToServer() — leads POST to backend on capture
-  - deleteLeadFromServer() — backend delete on local delete
-  - syncLeadsFromServer() — on login, merges server leads into local store
+  - syncLeadToServer() — leads POST to backend on capture (includes cost estimate)
+  - deleteLeadFromServer() — backend delete on local delete; clear-all propagates
+  - syncLeadsFromServer() — on login/register, merges server leads; fetches snapshots via GET /api/leads/:id
+  - syncDealerFromServer() — pulls dealer profile from server on session restore
   - syncEventToServer() — every analytics event also POSTed to backend (best-effort)
   - apiUpdateDealer() — dealer settings synced on save
   - loginToServer() / registerOnServer() / logoutFromServer()
-  - Server Sync section added to Settings modal: Sign In / Create Account tabs, status chip
+  - Pilot Analytics uses GET /api/events/summary when signed in
+  - Shade catalog loads from /api/shades when signed in (falls back to shades.json offline)
+  - Server Sync section in Settings modal + standalone /login page
 
-Phase 5 - CRM Lite
-- Customer CRUD
-- Site/project basics
-- Link preview sessions to customer/site timeline
+Phase 5 - CRM Lite (Done — Jul 2026)
+- Customer CRUD (end_customer / contractor types) — create, edit, delete
+- Site/project basics per customer (create via form)
+- Preview session timeline linked to customer (session_start, shade_selected, lead_captured)
+- Auto-link leads/sessions to customers by phone on server sync
+- Frontend Customers modal with search, timeline, site management
+- Lead detail links to the linked customer profile
+- Offline customer cache (localStorage) — viewable offline; writes require sign-in
+- Backend: /api/customers, /api/customers/:id/timeline, /api/sites, /api/sessions
+- Full Jest suite (56 tests) green against PostgreSQL; coverage >70%
 
-Phase 6 - Commercial Modules
-- Quote -> order basic flow
-- Inventory basics and stock status
-- Credit ledger v1 and reminder actions
+Phase 6 - Commercial Modules (In progress)
+- Quote -> order basic flow (Done — Jul 2026)
+  - quotes/quote_items + orders/order_items tables (migration 007), per-tenant sequential
+    document numbers (Q-0001 / O-0001)
+  - Backend: /api/quotes (list/create/read/update/delete, PATCH status, POST convert) and
+    /api/orders (list/create/read/delete, PATCH status)
+  - Totals computed server-side: line_total = qty x unit_price; subtotal; discount on subtotal;
+    tax as % of discounted base; total. Client line totals are never trusted.
+  - Convert = snapshot quote items + totals into a new order, lock quote as 'converted'
+  - Frontend: Quotes button -> Quotes/Orders tabbed modal, quote builder (customer/site,
+    line items from catalog or manual, discount/tax, live totals), detail view with status
+    controls and Convert to Order. Requires sign-in.
+  - Jest: quotes.test.js + orders.test.js (backend suite now 75 tests, coverage >70%)
+- Inventory basics and stock status (Done — Jul 2026)
+  - inventory_items + inventory_movements tables (migration 008); per-tenant optional SKU
+    (partial unique index), reorder levels, selling/cost prices
+  - Derived stock status: in_stock / low_stock / out_of_stock (quantity vs reorder level)
+  - Backend: /api/inventory (list with ?q=/?status=, create, read w/ movements, update,
+    delete), POST /:id/adjust (signed movement, blocks negative stock, audit trail), and
+    GET /summary (counts by status + total stock value)
+  - Quantity only moves through /adjust so every change is recorded with a running balance
+  - Frontend: Inventory button -> item list (search + status filter + summary chips), item
+    form (catalog-linked), detail view with receive/issue adjust controls and movement log
+  - Jest: inventory.test.js (backend suite now 90 tests, coverage >70%)
+- Credit ledger v1 and payment reminders (Done — Jul 2026)
+  - ledger_entries + payment_reminders tables (migration 009); append-only per-customer
+    account of debits (charges / order totals) and credits (payments / adjustments), each
+    row storing the running balance after it was applied
+  - Balance convention: positive = customer owes; negative = advance/credit. Balance is
+    recomputed under a per-customer row lock so concurrent posts stay consistent.
+  - Order totals post automatically: creating (or converting to) an order writes a debit;
+    deleting the order writes a compensating reversal credit (ledger stays append-only)
+  - Overdue = owes money AND a dated debit is past due; overdue accounts sort first
+  - Backend: GET /api/ledger/summary (receivables snapshot), GET /api/ledger/customers
+    (debtor worklist, ?overdue=true / ?q=), GET /api/ledger/customers/:id (statement),
+    POST /:id/entries (debit/credit), POST /:id/reminders (log follow-up + balance snapshot)
+  - Frontend: Ledger button -> summary chips + debtor worklist (search + overdue filter),
+    account detail with record-payment / add-charge / log-reminder controls and statement
+  - Jest: ledger.test.js (backend suite now 104 tests, coverage >70%)
+
+Scale hardening (Done — Jul 2026)
+- Pagination: shared lib/pagination.js; every list endpoint (customers, leads, quotes,
+  orders, inventory, ledger/customers) takes ?limit=&offset= (default 50, max 200) and
+  returns pagination:{total,limit,offset,hasMore} via a COUNT(*) OVER() window column.
+  Frontend debtor worklist has a "Load more" pager (createPaginator + withPageParams).
+- Auth lifecycle: short-lived access JWT (~15m) + rotating refresh tokens persisted as
+  SHA-256 hashes (migration 010 refresh_tokens). /auth/refresh rotates + does reuse
+  detection (replaying a rotated token revokes the whole chain); /auth/logout and
+  /auth/logout-all revoke sessions. Frontend refreshes transparently on 401. Password
+  policy raised to >=8 chars with a letter and a number. TTLs via ACCESS_TOKEN_TTL /
+  REFRESH_TOKEN_TTL_DAYS.
+- Frontend modularization: Vite build (minified + hashed assets, sourcemaps); logic split
+  into ES modules src/api.js, src/utils.js, src/pagination.js with Vitest+jsdom unit tests
+  (21 frontend tests). Server serves built dist/ when present, else raw source.
+- Deployment: multi-stage Dockerfile now builds the frontend; fly.toml + CI Fly.io deploy
+  (staging -> production, gated on FLY_API_TOKEN); DB_SSL flag for Fly-internal vs managed
+  Postgres. Backend suite now 123 Jest tests.
 
 Phase 7 - AI and Differentiation
 - Better palette recommendations (style/mood)

@@ -4,99 +4,123 @@ const cors = require('cors');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const pinoHttp = require('pino-http');
-const promClient = require('prom-client');
 const path = require('path');
+const fs = require('fs');
 
-// Initialize Express app
+const { register, httpRequestDuration, httpRequestErrors } = require('./lib/metrics');
+
+// Picks the directory to serve the frontend from: an explicit FRONTEND_DIR
+// override, else the Vite build output if present, else the raw source.
+function resolveFrontendDir() {
+  if (process.env.FRONTEND_DIR) return path.resolve(process.env.FRONTEND_DIR);
+  const distDir = path.join(__dirname, '../paint-preview-app/dist');
+  if (fs.existsSync(path.join(distDir, 'index.html'))) return distDir;
+  return path.join(__dirname, '../paint-preview-app');
+}
+
 const app = express();
 
-// Create a Registry to register the metrics
-const register = new promClient.Registry();
-promClient.collectDefaultMetrics({ register });
-
-// Custom metrics
-const httpRequestDuration = new promClient.Histogram({
-  name: 'http_request_duration_seconds',
-  help: 'Duration of HTTP requests in seconds',
-  labelNames: ['method', 'route', 'status_code'],
-  buckets: [0.01, 0.05, 0.1, 0.5, 1, 2, 5]
-});
-register.registerMetric(httpRequestDuration);
-
-const httpRequestErrors = new promClient.Counter({
-  name: 'http_request_errors_total',
-  help: 'Total number of HTTP request errors',
-  labelNames: ['method', 'route', 'status_code']
-});
-register.registerMetric(httpRequestErrors);
-
-const dbQueryDuration = new promClient.Histogram({
-  name: 'db_query_duration_seconds',
-  help: 'Duration of database queries in seconds',
-  labelNames: ['query_type'],
-  buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1]
-});
-register.registerMetric(dbQueryDuration);
+// Trust the first proxy hop (required for correct req.ip behind nginx / load balancers)
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "blob:"],
-    }
-  }
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      // 'unsafe-inline' is needed for the login page + the auth-gate bootstrap
+      // scripts (static HTML, so no per-request nonce). jsdelivr serves the
+      // optional TensorFlow.js wall-assist libraries.
+      scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
+      // TensorFlow.js downloads its wasm backend + segmentation model weights.
+      connectSrc: ["'self'", 'https://cdn.jsdelivr.net', 'https://storage.googleapis.com', 'https://tfhub.dev'],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+    },
+  },
 }));
 
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
-  credentials: true
+  credentials: true,
 }));
 
 app.use(compression());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'test' ? 1000 : 100, // Limit each IP
-  message: { error: 'Too many requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false
-});
-app.use('/api/', limiter);
+// Rate limiting — uses Redis when REDIS_URL is set, falls back to in-memory
+const rateLimitingEnabled = process.env.ENABLE_RATE_LIMITING !== 'false';
 
-// Stricter rate limit for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10, // 10 attempts per hour
-  skipSuccessfulRequests: true
-});
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
+function buildStore(windowMs, prefix) {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) return undefined; // express-rate-limit defaults to MemoryStore
 
-// Logging
+  try {
+    const Redis = require('ioredis');
+    const client = new Redis(redisUrl, { lazyConnect: true, enableOfflineQueue: false });
+    const windowSeconds = Math.ceil(windowMs / 1000);
+
+    return {
+      async increment(key) {
+        const rk = prefix + key;
+        const pipeline = client.pipeline();
+        pipeline.incr(rk);
+        pipeline.expire(rk, windowSeconds, 'NX');
+        pipeline.pttl(rk);
+        const [[, count], , [, pttl]] = await pipeline.exec();
+        const resetTime = pttl > 0
+          ? new Date(Date.now() + pttl)
+          : new Date(Date.now() + windowSeconds * 1000);
+        return { totalHits: count, resetTime };
+      },
+      async decrement(key) { await client.decr(prefix + key); },
+      async resetKey(key) { await client.del(prefix + key); },
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+if (rateLimitingEnabled) {
+  const apiWindowMs = 15 * 60 * 1000;
+  const limiter = rateLimit({
+    windowMs: apiWindowMs,
+    max: process.env.NODE_ENV === 'test' ? 1000 : 100,
+    message: { error: 'Too many requests, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: buildStore(apiWindowMs, 'rl:api:'),
+  });
+  app.use('/api/', limiter);
+
+  const authWindowMs = 60 * 60 * 1000;
+  const authLimiter = rateLimit({
+    windowMs: authWindowMs,
+    max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+    skipSuccessfulRequests: true,
+    store: buildStore(authWindowMs, 'rl:auth:'),
+  });
+  app.use('/api/auth/login', authLimiter);
+  app.use('/api/auth/register', authLimiter);
+}
+
+// Structured logging
 const logger = pinoHttp({
   level: process.env.LOG_LEVEL || 'info',
   redact: {
     paths: ['req.headers.authorization', 'req.body.password'],
-    remove: true
-  }
+    remove: true,
+  },
 });
 app.use(logger);
 
-// Metrics middleware
+// HTTP metrics middleware
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
     const duration = (Date.now() - start) / 1000;
     const route = req.route?.path || req.path;
-    httpRequestDuration.observe(
-      { method: req.method, route, status_code: res.statusCode },
-      duration
-    );
+    httpRequestDuration.observe({ method: req.method, route, status_code: res.statusCode }, duration);
     if (res.statusCode >= 400) {
       httpRequestErrors.inc({ method: req.method, route, status_code: res.statusCode });
     }
@@ -122,42 +146,49 @@ app.use('/api/leads', require('./routes/leads'));
 app.use('/api/shades', require('./routes/shades'));
 app.use('/api/dealer', require('./routes/dealer'));
 app.use('/api/events', require('./routes/events'));
+app.use('/api/customers', require('./routes/customers'));
+app.use('/api/sites', require('./routes/sites'));
+app.use('/api/sessions', require('./routes/sessions'));
+app.use('/api/quotes', require('./routes/quotes'));
+app.use('/api/orders', require('./routes/orders'));
+app.use('/api/inventory', require('./routes/inventory'));
+app.use('/api/ledger', require('./routes/ledger'));
 
-// Health check with database connectivity
+// Health probes
 app.get('/api/health', async (req, res) => {
   const { checkHealth } = require('./lib/db');
   const dbHealth = await checkHealth();
-  
-  const health = {
+  res.status(dbHealth.healthy ? 200 : 503).json({
     status: dbHealth.healthy ? 'healthy' : 'unhealthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     version: process.env.npm_package_version || '1.1.0',
-    database: dbHealth.healthy ? 'connected' : 'disconnected'
-  };
-  
-  res.status(dbHealth.healthy ? 200 : 503).json(health);
+    database: dbHealth.healthy ? 'connected' : 'disconnected',
+  });
 });
 
-// Readiness probe (for Kubernetes)
 app.get('/api/ready', async (req, res) => {
   const { checkHealth } = require('./lib/db');
   const dbHealth = await checkHealth();
-  
-  if (dbHealth.healthy) {
-    res.status(200).json({ ready: true });
-  } else {
-    res.status(503).json({ ready: false });
-  }
+  res.status(dbHealth.healthy ? 200 : 503).json({ ready: dbHealth.healthy });
 });
 
-// Liveness probe
 app.get('/api/live', (req, res) => {
   res.status(200).json({ alive: true });
 });
 
-// Prometheus metrics endpoint
+// Prometheus metrics — optionally protected by METRICS_TOKEN
 app.get('/metrics', async (req, res) => {
+  if (process.env.ENABLE_METRICS === 'false') {
+    return res.status(404).end();
+  }
+  const metricsToken = process.env.METRICS_TOKEN;
+  if (metricsToken) {
+    const provided = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (provided !== metricsToken) {
+      return res.status(401).end();
+    }
+  }
   res.set('Content-Type', register.contentType);
   res.end(await register.metrics());
 });
@@ -167,8 +198,10 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// Static files (frontend)
-const FRONTEND_DIR = path.join(__dirname, '../paint-preview-app');
+// Static frontend files. Prefer an explicit FRONTEND_DIR, then a Vite build
+// output (paint-preview-app/dist), falling back to the raw source directory
+// so local dev works without a build step.
+const FRONTEND_DIR = resolveFrontendDir();
 app.use(express.static(FRONTEND_DIR));
 
 // SPA fallback
@@ -176,28 +209,20 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  req.log.error(err);
-  
+// Error handler
+app.use((err, req, res, _next) => {
+  req.log?.error(err);
+
   if (err.name === 'ValidationError') {
     return res.status(400).json({ error: err.message });
   }
-  
   if (err.code === 'ECONNREFUSED') {
     return res.status(503).json({ error: 'Service temporarily unavailable' });
   }
-  
-  res.status(err.status || 500).json({ 
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message 
-  });
-});
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+  });
 });
 
 module.exports = app;

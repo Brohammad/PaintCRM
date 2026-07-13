@@ -4,6 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sign In — PaintCRM</title>
+  <!-- Already signed in? Skip the login page and go straight to the app. -->
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem("paintcrm_api_token_v1")) {
+          var params = new URLSearchParams(location.search);
+          location.replace(params.get("redirect") || "/");
+        }
+      } catch (e) {
+        /* localStorage blocked — show the login form */
+      }
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet" />
@@ -245,8 +258,6 @@
 <body>
   <div class="login-wrap">
     <div class="login-card">
-      <a href="/" class="back-link">← Back to app</a>
-
       <div class="brand">
         <h1>PaintCRM</h1>
         <p>Sign in to sync leads and analytics</p>
@@ -302,7 +313,8 @@
       <div class="divider"></div>
 
       <div class="footer">
-        <p>Need help? <a href="mailto:support@paintcrm.example">Contact support</a></p>
+        <p><a href="#" id="guestLink">Continue without an account →</a></p>
+        <p style="margin-top:10px;">Need help? <a href="mailto:support@paintcrm.example">Contact support</a></p>
       </div>
     </div>
   </div>
@@ -349,9 +361,22 @@
       return { ok: res.ok, status: res.status, data };
     }
 
-    function setToken(t) {
-      try { localStorage.setItem('paintcrm_api_token_v1', t); } catch {}
+    // Persist the access + refresh token pair using the same keys the app reads,
+    // so the session survives access-token expiry (transparent refresh-on-401).
+    function setSession(data) {
+      try {
+        if (data && data.token) localStorage.setItem('paintcrm_api_token_v1', data.token);
+        if (data && data.refreshToken) localStorage.setItem('paintcrm_api_refresh_v1', data.refreshToken);
+        localStorage.removeItem('paintcrm_guest_v1');
+      } catch {}
     }
+
+    // "Continue without an account": flag guest mode and enter the offline app.
+    document.getElementById('guestLink').addEventListener('click', (e) => {
+      e.preventDefault();
+      try { localStorage.setItem('paintcrm_guest_v1', '1'); } catch {}
+      location.replace(getRedirect());
+    });
 
     function getRedirect() {
       const params = new URLSearchParams(location.search);
@@ -388,7 +413,7 @@
         return;
       }
 
-      setToken(data.token);
+      setSession(data);
       showSuccess('Signed in! Redirecting…');
       setTimeout(() => {
         location.href = getRedirect();
@@ -429,7 +454,7 @@
         return;
       }
 
-      setToken(data.token);
+      setSession(data);
       showSuccess('Account created! Redirecting…');
       setTimeout(() => {
         location.href = getRedirect();

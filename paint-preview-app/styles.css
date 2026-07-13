@@ -349,6 +349,15 @@ body {
   font-size: 0.82rem;
 }
 
+.button.danger {
+  color: #b3261e;
+}
+
+.button.danger:hover {
+  background: #fbeae8;
+  border-color: #f0c4c0;
+}
+
 .status-chip {
   margin: 4px 0 8px;
   display: inline-block;
@@ -937,4 +946,374 @@ body {
 .sync-status.connected {
   background: #e6f9f0;
   color: #1a8a52;
+}
+
+/* Phase 5: CRM Lite */
+.crm-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.crm-search {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.customer-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+
+.customer-card:hover { border-color: var(--accent); }
+
+.customer-card .name { font-weight: 600; }
+.customer-card .phone { color: var(--muted); font-size: 0.85rem; }
+.customer-card .stats { font-size: 0.78rem; color: var(--muted); text-align: right; }
+
+.timeline-list { margin-top: 16px; }
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.timeline-item:last-child { border-bottom: none; }
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: 5px;
+}
+
+.timeline-item .when { font-size: 0.78rem; color: var(--muted); }
+.timeline-item .kind {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.sites-list { margin: 12px 0; }
+
+.site-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  margin: 0 6px 6px 0;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+/* ===================== Phase 6: Quotes & Orders ===================== */
+
+.doc-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.doc-card:hover { border-color: var(--accent); }
+.doc-card .doc-number { font-weight: 600; }
+.doc-card .doc-sub { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+.doc-card .doc-right { text-align: right; }
+.doc-card .doc-total { font-weight: 600; }
+
+.status-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+.status-badge.draft { background: #ece8dd; color: #6b675e; }
+.status-badge.sent { background: #e3edf7; color: #2b6299; border-color: #cfe0f0; }
+.status-badge.accepted,
+.status-badge.confirmed { background: #e3f2e6; color: #2f7d43; border-color: #cbe6d1; }
+.status-badge.rejected,
+.status-badge.cancelled { background: #f7e2df; color: #a5372a; border-color: #eecbc5; }
+.status-badge.converted,
+.status-badge.fulfilled { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
+.status-badge.pending { background: #f6efd8; color: #8a6d1e; border-color: #ece0bb; }
+.status-badge.in_stock { background: #e3f2e6; color: #2f7d43; border-color: #cbe6d1; }
+.status-badge.low_stock { background: #f6efd8; color: #8a6d1e; border-color: #ece0bb; }
+.status-badge.out_of_stock { background: #f7e2df; color: #a5372a; border-color: #eecbc5; }
+
+.section-label {
+  margin: 18px 0 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.quote-items-head,
+.quote-item-row {
+  display: grid;
+  grid-template-columns: 1fr 70px 90px 90px 32px;
+  gap: 8px;
+  align-items: center;
+}
+.quote-items-head {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  padding: 0 2px 4px;
+}
+.quote-items-head span:nth-child(2),
+.quote-items-head span:nth-child(3),
+.quote-items-head span:nth-child(4) { text-align: right; }
+
+.quote-item-row { margin-bottom: 6px; }
+.quote-item-row input {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+.quote-item-row input.qi-qty,
+.quote-item-row input.qi-price { text-align: right; }
+.quote-item-row .qi-line {
+  text-align: right;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.quote-item-row .qi-remove {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 4px;
+}
+.quote-item-row .qi-remove:hover { color: var(--accent); }
+.qi-desc-wrap { display: flex; flex-direction: column; gap: 3px; }
+.qi-brand {
+  font-size: 0.72rem !important;
+  padding: 4px 8px !important;
+  color: var(--muted);
+}
+
+.quote-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 4px;
+}
+
+.quote-totals {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.quote-totals .t-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  padding: 3px 0;
+}
+.quote-totals .t-row.grand {
+  font-weight: 700;
+  font-size: 1.05rem;
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 8px;
+}
+.quote-totals .t-row span:last-child { font-variant-numeric: tabular-nums; }
+
+.form-error {
+  color: var(--accent);
+  font-size: 0.85rem;
+  min-height: 1.2em;
+  margin: 8px 0 0;
+}
+
+.doc-detail-items {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 12px;
+  font-size: 0.88rem;
+}
+.doc-detail-items th,
+.doc-detail-items td {
+  text-align: left;
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.doc-detail-items th:not(:first-child),
+.doc-detail-items td:not(:first-child) { text-align: right; }
+.doc-detail-items td { font-variant-numeric: tabular-nums; }
+
+.doc-status-select {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  margin-right: auto;
+}
+
+/* ===================== Phase 6: Inventory ===================== */
+
+.inv-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.inv-summary .inv-chip {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  text-align: center;
+}
+.inv-summary .inv-chip .n { font-weight: 700; font-size: 1.15rem; }
+.inv-summary .inv-chip .l {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+.inv-summary .inv-chip.low .n { color: #8a6d1e; }
+.inv-summary .inv-chip.out .n { color: #a5372a; }
+
+.inv-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.inv-card:hover { border-color: var(--accent); }
+.inv-card.low { border-left: 3px solid #d9a521; }
+.inv-card.out { border-left: 3px solid var(--accent); }
+.inv-card .name { font-weight: 600; }
+.inv-card .meta { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+.inv-card .qty { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.inv-card .qty small { display: block; font-weight: 400; }
+
+.inv-adjust {
+  margin: 14px 0 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.inv-adjust h4 { margin: 0 0 8px; font-size: 0.85rem; }
+.inv-adjust-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.inv-adjust-row input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+.inv-adjust-row .inv-delta { width: 110px; text-align: right; }
+.inv-adjust-row .inv-reason { flex: 1; min-width: 140px; }
+
+.inv-movements {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+.inv-movements th,
+.inv-movements td {
+  text-align: left;
+  padding: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.inv-movements td:nth-child(2),
+.inv-movements td:nth-child(3),
+.inv-movements th:nth-child(2),
+.inv-movements th:nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
+.inv-movements .pos { color: #2f7d43; }
+.inv-movements .neg { color: #a5372a; }
+
+/* Phase 6: Credit Ledger */
+.inv-card .qty small { display: block; font-weight: 400; color: var(--muted); }
+.ledger-owes { color: #a5372a; }
+.ledger-credit { color: #2f7d43; }
+
+.ledger-entry-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ledger-entry-row input,
+.ledger-entry-row select {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+.ledger-entry-row .inv-delta { width: 130px; text-align: right; }
+.ledger-entry-row .inv-reason { flex: 1; min-width: 140px; }
+.ledger-entry-row .ledger-due { flex: 0 0 auto; }
+.ledger-entry-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+.ledger-reminders {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ledger-reminders li {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.ledger-reminders li .status-badge { margin-right: 6px; }
+
+/* "Load more" pager row shared by paginated lists */
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 4px;
+}
+.load-more-row .button {
+  min-width: 180px;
 }

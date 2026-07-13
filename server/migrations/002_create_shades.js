@@ -1,4 +1,7 @@
 exports.up = async (pgm) => {
+  // pg_trgm is required for GIN indexes on varchar columns
+  pgm.sql('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+
   pgm.createTable('shades', {
     id: { type: 'varchar(50)', primaryKey: true },
     name: { type: 'varchar(255)', notNull: true },
@@ -13,10 +16,17 @@ exports.up = async (pgm) => {
 
   pgm.createIndex('shades', 'brand');
   pgm.createIndex('shades', 'color_family');
-  pgm.createIndex('shades', ['name', 'brand', 'collection', 'color_family'], { 
-    method: 'gin',
-    name: 'shades_search_idx'
-  });
+
+  // Trigram GIN index for ILIKE full-text search across name/brand/collection/color_family
+  pgm.sql(`
+    CREATE INDEX shades_search_idx ON shades
+    USING gin (
+      name gin_trgm_ops,
+      brand gin_trgm_ops,
+      collection gin_trgm_ops,
+      color_family gin_trgm_ops
+    )
+  `);
 };
 
 exports.down = async (pgm) => {
