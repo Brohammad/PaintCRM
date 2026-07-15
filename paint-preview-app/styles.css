@@ -287,6 +287,78 @@ body {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.suggestion-grid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.ai-palette-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: stretch;
+}
+
+.ai-palette-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #d8d8d8;
+  border-radius: 10px;
+  font-size: 0.88rem;
+}
+
+.ai-palette-row .button.tiny {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.suggestion-card {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #d8d8d8;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.suggestion-card.active {
+  border-color: var(--accent, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.suggestion-swatch {
+  flex: 0 0 44px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  min-height: 44px;
+}
+
+.suggestion-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.suggestion-name {
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.suggestion-brand,
+.suggestion-cost,
+.suggestion-mood {
+  line-height: 1.2;
+}
+
 .swatch {
   border: 1px solid #d8d8d8;
   border-radius: 10px;

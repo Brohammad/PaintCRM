@@ -7,10 +7,12 @@ const {
   REMINDER_CHANNELS,
   addEntry,
   addReminder,
+  sendReminder,
   getCustomerLedger,
   listBalances,
   ledgerSummary,
 } = require('../lib/ledger');
+const { runOverdueRemindersForTenant } = require('../jobs/reminders');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -90,6 +92,46 @@ router.post('/customers/:id/reminders', async (req, res, next) => {
     if (result.notFound) return res.status(404).json({ error: 'Customer not found' });
 
     res.status(201).json({ reminder: result.reminder, balance: result.balance });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ledger/customers/:id/reminders/send — deliver + log a reminder
+router.post('/customers/:id/reminders/send', async (req, res, next) => {
+  try {
+    const channel = req.body?.channel || 'whatsapp';
+    const note = (req.body?.note || '').toString();
+    if (!['whatsapp', 'sms'].includes(channel)) {
+      return res.status(400).json({ error: "channel must be 'whatsapp' or 'sms'" });
+    }
+
+    const result = await sendReminder(req.tenant.id, req.params.id, {
+      channel,
+      note,
+      shopName: req.tenant.shopName,
+    });
+    if (result.notFound) return res.status(404).json({ error: 'Customer not found' });
+    if (result.noPhone) return res.status(400).json({ error: 'Customer has no phone number on file' });
+
+    const ledger = await getCustomerLedger(req.tenant.id, req.params.id);
+    res.status(201).json({
+      reminder: result.reminder,
+      balance: result.balance,
+      delivery: result.delivery,
+      message: result.message,
+      ledger,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ledger/reminders/run-overdue — manual cron trigger for signed-in tenant
+router.post('/reminders/run-overdue', async (req, res, next) => {
+  try {
+    const result = await runOverdueRemindersForTenant(req.tenant.id, req.tenant.shopName);
+    res.json({ result });
   } catch (err) {
     next(err);
   }

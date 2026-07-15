@@ -1,4 +1,5 @@
 const { query, withTransaction } = require('./db');
+const { buildReminderMessage, deliverReminder } = require('./notify');
 
 // A customer's balance is the amount they currently owe: debits (charges / order
 // totals) increase it, credits (payments / adjustments) reduce it. A positive
@@ -144,6 +145,54 @@ async function addReminder(tenantId, customerId, input) {
     );
     return { reminder: formatReminder(inserted.rows[0]), balance };
   });
+}
+
+// Builds the reminder text, attempts outbound delivery (WhatsApp/SMS), and logs
+// the action. Returns { reminder, delivery, balance } or { notFound, noPhone }.
+async function sendReminder(tenantId, customerId, { channel = 'whatsapp', note = '', shopName = '' } = {}) {
+  const ledger = await getCustomerLedger(tenantId, customerId);
+  if (!ledger) return { notFound: true };
+
+  if (!['whatsapp', 'sms'].includes(channel)) {
+    const err = validationError(`send supports whatsapp or sms; got '${channel}'`);
+    throw err;
+  }
+
+  if (!ledger.phone) return { notFound: false, noPhone: true };
+
+  const message = buildReminderMessage({
+    shopName,
+    customerName: ledger.customerName,
+    balance: ledger.balance,
+    dueDate: ledger.oldestOverdueDate || ledger.oldestDueDate,
+  });
+
+  const delivery = await deliverReminder({
+    channel,
+    phone: ledger.phone,
+    message,
+  });
+
+  const deliveryNote = [
+    note,
+    delivery.sent ? `Sent via ${delivery.provider || channel}` : `Delivery: ${delivery.status}`,
+    delivery.url ? 'WhatsApp chat link generated' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const logged = await addReminder(tenantId, customerId, {
+    channel,
+    note: deliveryNote || message.slice(0, 240),
+  });
+  if (logged.notFound) return { notFound: true };
+
+  return {
+    reminder: logged.reminder,
+    balance: logged.balance,
+    delivery,
+    message,
+  };
 }
 
 // Full statement for one customer: balance, overdue state, entries + reminders.
@@ -316,6 +365,7 @@ module.exports = {
   postOrderDebit,
   reverseOrderPosting,
   addReminder,
+  sendReminder,
   getCustomerLedger,
   listBalances,
   ledgerSummary,

@@ -197,6 +197,51 @@ describe('Credit Ledger API', () => {
     expect(ledger.body.ledger.reminders[0].note).toBe('Sent gentle reminder');
   });
 
+  it('sends a WhatsApp reminder and returns a click-to-chat link', async () => {
+    await postEntry(customerId, { entryType: 'debit', amount: 800, dueDate: '2020-01-01' });
+
+    const res = await request(app)
+      .post(`/api/ledger/customers/${customerId}/reminders/send`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ channel: 'whatsapp' });
+    expect(res.status).toBe(201);
+    expect(res.body.delivery.method).toBe('click_to_chat');
+    expect(res.body.delivery.url).toMatch(/^https:\/\/wa\.me\//);
+    expect(res.body.reminder.channel).toBe('whatsapp');
+    expect(res.body.message).toMatch(/outstanding/i);
+  });
+
+  it('rejects send when the customer has no phone', async () => {
+    const noPhone = await request(app)
+      .post('/api/customers')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'No Phone Customer', phone: '555-0001' });
+    const { pool } = require('../lib/db');
+    await pool.query('UPDATE customers SET phone = $1 WHERE id = $2', ['', noPhone.body.customer.id]);
+    await postEntry(noPhone.body.customer.id, { entryType: 'debit', amount: 100 });
+
+    const res = await request(app)
+      .post(`/api/ledger/customers/${noPhone.body.customer.id}/reminders/send`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ channel: 'whatsapp' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/phone/i);
+  });
+
+  it('run-overdue skips WhatsApp when MSG91 is not configured', async () => {
+    const past = '2020-01-01';
+    await postEntry(customerId, { entryType: 'debit', amount: 500, dueDate: past });
+
+    const res = await request(app)
+      .post('/api/ledger/reminders/run-overdue')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    // Without MSG91, automated cron must not pretend WhatsApp click-to-chat was "sent".
+    expect(res.body.result.sent).toBe(0);
+    expect(res.body.result.skipped).toBeGreaterThan(0);
+    expect(res.body.result.results?.[0]?.error).toBe('cron_requires_sms');
+  });
+
   it('rejects an invalid reminder channel', async () => {
     const res = await request(app)
       .post(`/api/ledger/customers/${customerId}/reminders`)
