@@ -7,20 +7,22 @@ Date: 27 March 2026
 - Expansion principle: Only add new modules after measurable proof from the current module.
 
 2) Current Build Status
-Phases 0–4 are complete. Next up: Phase 5 (CRM Lite) after pilot dealers show repeat backend usage.
+Phases 0–6 + scale hardening are complete on the product surface. Phase 7 (AI + differentiation)
+is the active frontier (soft palette recommend + reminder notify scaffolding in progress).
 
-Completed (Phases 1–3):
-- Full decision engine, conversion layer, and pilot validation analytics (see Phase Roadmap below)
-
-Phase 4 complete (Jul 2026):
-- PostgreSQL backend with auth, leads, shades, dealer profile, funnel events
-- End-to-end frontend sync: leads, snapshots, dealer profile, server analytics, shade catalog
-- Docker, CI/CD, monitoring stack (Prometheus/Grafana)
+Completed:
+- Phases 1–3: decision engine, conversion layer, pilot analytics
+- Phase 4: PostgreSQL backend (auth, leads, shades, dealer, events) + frontend sync + Docker/CI/monitoring
+- Phase 5: CRM Lite (customers, sites, sessions/timeline)
+- Phase 6: quotes → orders, inventory, credit ledger + reminder logging
+- Scale hardening: pagination, refresh-token auth, Vite frontend modules, Fly/Render deploy
 
 Current validation objective:
 - Run pilot with 3–5 dealers on the full stack (signed in, server sync enabled)
-- Measure repeat sessions and contact/share rates via server analytics
-- Gate Phase 5 (CRM Lite) on evidence of repeated real usage
+- Measure repeat sessions, contact/share rates, and quote→ledger usage
+- Gate Phase 7 deep AI / WhatsApp delivery on evidence dealers use ledger reminders weekly
+
+See BACKLOG.md for prioritized engineering/product work outside the phase roadmap.
 
 3) Product Scope Guardrails
 Build now:
@@ -172,10 +174,11 @@ Scale hardening (Done — Jul 2026)
   (staging -> production, gated on FLY_API_TOKEN); DB_SSL flag for Fly-internal vs managed
   Postgres. Backend suite now 123 Jest tests.
 
-Phase 7 - AI and Differentiation
-- Better palette recommendations (style/mood)
-- Cost estimator in decision flow
-- Dealer assistant prompts for quoting and follow-up
+Phase 7 - AI and Differentiation (In progress — Jul 2026)
+- Soft palette recommendations (heuristic + optional OpenAI path) — scaffolding in tree
+- Cost estimator in decision flow (Done — earlier phase; keep improving accuracy)
+- Outbound reminder delivery (MSG91 SMS optional; WhatsApp click-to-chat; cron off by default)
+- Dealer assistant prompts for quoting and follow-up (not started)
 
 Phase 8 - Platform Expansion (Only after retention and monetization proof)
 - Contractor assignment and tracking

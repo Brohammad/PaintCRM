@@ -45,82 +45,63 @@ This starts:
 
 ## Deployment Options
 
-### Option 1: Docker Compose (Recommended for Single Server)
+### Option 1: Docker Compose (local / single VPS)
 
-**Pros**: Simple, all-in-one, includes monitoring
-**Best for**: Small to medium deployments, single team
+**Pros**: Simple, all-in-one, includes Redis + Prometheus + Grafana  
+**Best for**: Local prod-like runs, small VPS pilots  
+**Manifest**: `docker-compose.yml` at the repo root (there is no separate `docker-compose.prod.yml`)
 
 ```bash
-# Production start
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# From repo root — set JWT_SECRET and GRAFANA_ADMIN_PASSWORD first
+export JWT_SECRET="$(openssl rand -hex 32)"
+export GRAFANA_ADMIN_PASSWORD="$(openssl rand -hex 16)"
+export ALLOWED_ORIGINS="https://your-domain.example,http://localhost:3001"
+
+docker compose up -d
 
 # View logs
-docker-compose logs -f app
+docker compose logs -f app
 
-# Scale to multiple instances
-docker-compose up -d --scale app=3
+# Health
+curl http://localhost:3001/api/health
 ```
 
-### Option 2: Kubernetes
+> Scaling with `docker compose up -d --scale app=N` only works if each app instance shares Postgres + Redis and you put a reverse proxy in front. The default compose file is single-instance oriented.
 
-**Pros**: Auto-scaling, rolling updates, high availability
-**Best for**: Large deployments, multiple teams
+### Option 2: Render + Neon (current public demo path)
 
-```yaml
-# kubernetes/deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: paintcrm-app
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: paintcrm
-  template:
-    metadata:
-      labels:
-        app: paintcrm
-    spec:
-      containers:
-      - name: app
-        image: paintcrm:latest
-        ports:
-        - containerPort: 3001
-        env:
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: paintcrm-secrets
-              key: database-url
-        livenessProbe:
-          httpGet:
-            path: /api/live
-            port: 3001
-          initialDelaySeconds: 10
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /api/ready
-            port: 3001
-          initialDelaySeconds: 5
-          periodSeconds: 5
-```
-
-### Option 3: Cloud Platform (AWS/GCP/Azure)
-
-**AWS Example with ECS**:
+**Pros**: No credit card on free tier; blueprint-driven  
+**Manifest**: `render.yaml`  
+**Database**: Neon Postgres (`DATABASE_URL`)
 
 ```bash
-# Build and push to ECR
-aws ecr get-login-password | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
-docker build -t paintcrm ./server
-docker tag paintcrm:latest $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/paintcrm:latest
-docker push $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/paintcrm:latest
-
-# Deploy with ECS Fargate
-aws ecs update-service --cluster paintcrm --service app --force-new-deployment
+# Dashboard: New → Blueprint → connect this repo
+# Paste Neon connection string when prompted for DATABASE_URL
+# Ensure ALLOWED_ORIGINS includes your public HTTPS origin(s)
 ```
+
+Production boot will refuse to start without `JWT_SECRET` (≥32 chars) and `ALLOWED_ORIGINS`.
+
+### Option 3: Fly.io
+
+**Pros**: HTTPS, health checks, region placement  
+**Manifest**: `fly.toml` (CI deploy is gated on `FLY_API_TOKEN`)
+
+```bash
+fly launch   # once
+fly secrets set JWT_SECRET=... ALLOWED_ORIGINS=https://your.app.fly.dev DATABASE_URL=...
+fly deploy
+```
+
+### Option 4: Other clouds (ECS / GKE / AKS)
+
+PaintCRM is a single Docker image (`server/Dockerfile`) plus managed Postgres. Use any container platform with:
+
+- `DATABASE_URL`, `JWT_SECRET`, `ALLOWED_ORIGINS`
+- Health: `/api/live` (liveness), `/api/ready` (readiness), `/api/health` (detail)
+- Optional: `REDIS_URL` for distributed rate limits, `METRICS_TOKEN` for `/metrics`
+
+Kubernetes manifests are **not** shipped in this repo yet (tracked in BACKLOG). Prefer Compose / Render / Fly until multi-replica demand is real.
 
 ---
 
@@ -281,10 +262,13 @@ pg_restore -h localhost -U postgres -d paintcrm paintcrm_backup.dump
 
 ### Pre-Production Checklist
 
-- [ ] Change default JWT_SECRET to 32+ random characters
-- [ ] Enable HTTPS (use reverse proxy like nginx/traefik)
-- [ ] Set secure CORS origins (not `*`)
-- [ ] Enable rate limiting (already enabled by default)
+- [ ] Set `JWT_SECRET` to 32+ random characters (production boot fails without it)
+- [ ] Set `ALLOWED_ORIGINS` to your public HTTPS origin(s) (production boot fails if unset)
+- [ ] Set `APP_PUBLIC_URL` to the public HTTPS origin (password-reset email links)
+- [ ] Configure `SMTP_*` + `FROM_EMAIL` so password-reset emails actually send (otherwise production logs a warning and skips send)
+- [ ] Enable HTTPS (use reverse proxy like nginx/traefik, or Fly/Render termination)
+- [ ] Confirm CORS allowlist does **not** include `*` unless intentionally public
+- [ ] Enable rate limiting (already enabled by default; set `REDIS_URL` for multi-instance)
 - [ ] Review and tighten CSP headers in helmet config
 - [ ] Enable database SSL connections
 - [ ] Set up log aggregation (ELK/Loki)
@@ -379,17 +363,38 @@ docker-compose exec app node -e "require('./lib/db').checkHealth().then(console.
 | `GET /api/ready` | Ready to serve traffic | `200` {ready: true} |
 | `GET /metrics` | Prometheus metrics | Text format metrics |
 
+### Password reset not emailing
+
+1. Confirm `APP_PUBLIC_URL` matches the public HTTPS origin
+2. Confirm `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `FROM_EMAIL` are set
+3. In development without SMTP, the reset URL is printed to the server console (`[password-reset]`)
+4. API always returns a generic success message — this is intentional (no email enumeration)
+
+### Browser E2E locally
+
+See [`e2e/README.md`](e2e/README.md). CI runs Playwright after unit tests and fails the pipeline on regression.
+
+### Manual overdue SMS job (ops only)
+
+```bash
+# Requires auth + MSG91_AUTH_KEY. Without MSG91 the job skips (does not open WhatsApp links).
+curl -X POST "$APP_URL/api/ledger/reminders/run-overdue" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+Keep `ENABLE_REMINDER_CRON=false` unless MSG91 is production-ready.
+
 ---
 
 ## Support
 
 For production issues:
 
-1. Check logs: `docker-compose logs -f app`
+1. Check logs: `docker compose logs -f app`
 2. Review metrics: `http://localhost:9090`
 3. Check dashboards: `http://localhost:3000`
 4. File an issue: https://github.com/Brohammad/PaintCRM/issues
 
 ---
 
-*Last updated: June 2026*
+*Last updated: July 2026*

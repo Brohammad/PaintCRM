@@ -9,6 +9,11 @@ A paint decision engine that helps customers choose a wall color confidently in 
 | **Architecture** | [`ARCHITECTURE.md`](ARCHITECTURE.md) — full system reference |
 | **Operations** | [`OPERATIONS.md`](OPERATIONS.md) — deploy, monitoring, runbooks |
 | **Roadmap** | [`master-plan.txt`](master-plan.txt) — phase plan + metrics |
+| **Backlog** | [`BACKLOG.md`](BACKLOG.md) — P2/P3 only (P0/P1 closed) |
+| **Contributing** | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) · MIT [`LICENSE`](LICENSE) |
+| **Readiness** | [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) · [`docs/TENANCY.md`](docs/TENANCY.md) · [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md) |
+| **E2E** | [`e2e/README.md`](e2e/README.md) — Playwright (runs in CI) |
+| **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) |
 
 ---
 
@@ -26,8 +31,8 @@ flowchart TB
 
   subgraph Server["Express API :3001"]
     MW["Helmet · CORS · rate limit · JWT auth"]
-    RT["12 route modules"]
-    LB["8 domain libs"]
+    RT["13 route modules"]
+    LB["domain libs"]
     MW --> RT --> LB
   end
 
@@ -43,7 +48,7 @@ flowchart TB
   Server --> PR
 ```
 
-**Auth lifecycle (summary):** register/login → short-lived access token (~15m) + rotating refresh token (SHA-256 hash stored server-side) → transparent refresh on `401` → reuse detection revokes the session chain on token replay.
+**Auth lifecycle (summary):** register/login → short-lived access token (~15m) + rotating refresh token (SHA-256 hash stored server-side) → transparent refresh on `401` → reuse detection revokes the session chain on token replay. Password reset uses single-use hashed tokens + optional SMTP (dev logs the reset URL when SMTP is unset).
 
 **Data integrity highlights:** server-computed quote/order totals · append-only credit ledger with row-level locking · auditable inventory movements · per-tenant document numbering.
 
@@ -56,7 +61,7 @@ flowchart TB
 | **Frontend** | Vanilla JS, Vite, Vitest, Canvas 2D, optional DeepLab wall assist |
 | **Backend** | Node.js, Express, `node-pg-migrate` |
 | **Database** | PostgreSQL with tenant-scoped queries |
-| **Auth** | JWT access + rotating refresh, bcrypt (12 rounds), session revocation |
+| **Auth** | JWT access + rotating refresh, bcrypt (12 rounds), password reset, session revocation |
 | **Observability** | Prometheus metrics, Pino structured logs, health/ready/live probes |
 | **Infra** | Docker multi-stage, GitHub Actions CI/CD, Fly.io + Render deploy |
 
@@ -64,13 +69,14 @@ flowchart TB
 
 ## Test coverage
 
-| Suite | Files | Tests | Runner |
-|-------|-------|-------|--------|
-| Backend API | 15 | 123 | Jest + Supertest |
-| Frontend units | 9 | 80 | Vitest + jsdom |
-| **Total** | **24** | **203** | CI on every push |
+| Suite | Runner | CI |
+|-------|--------|-----|
+| Backend API / libs | Jest + Supertest | ✅ (Postgres service) |
+| Frontend units | Vitest + jsdom | ✅ |
+| Browser E2E | Playwright (`e2e/`) | ✅ (fails build on regression) |
+| Container scan | Trivy | ✅ |
 
-Key frontend modules under test: wall segmentation heuristics, HSL tint pipeline, paint cost estimator, API token refresh, pagination contract.
+Key frontend modules under test: wall segmentation, HSL tint, cost estimator, API refresh, pagination, palette ranking. Views: `src/views/{customers,quotes,inventory,ledger}.js`.
 
 ---
 
@@ -108,7 +114,7 @@ Use this flow for interviews, Loom recordings, or a live dealer walkthrough.
 | Path | Description |
 |------|-------------|
 | `paint-preview-app/` | Main app — Vite-bundled HTML/CSS/JS; `src/` holds tested ES modules (color, segmentation, tint, api, …) |
-| `server/` | Backend — Node.js + Express + PostgreSQL; 12 route modules, 8 domain libs, 10 migrations |
+| `server/` | Backend — Node.js + Express + PostgreSQL; 13 route modules, domain libs, 10 migrations |
 | `paint-preview-app/react-canvas-component/` | Reusable React/Next.js component extracting the same canvas logic |
 | `test-scripts/` | Playwright E2E tests and backend smoke test scaffolding |
 | `ARCHITECTURE.md` | Authoritative technical reference (algorithms, schema, data flows) |
@@ -203,6 +209,8 @@ A full Node.js + Express + PostgreSQL backend in `server/` with:
 | `POST /api/auth/refresh` | Exchange a refresh token for a fresh access token (rotates the refresh token) |
 | `POST /api/auth/logout` | Revoke the current session's refresh token |
 | `POST /api/auth/logout-all` | Revoke every active session for the tenant |
+| `POST /api/auth/forgot-password` | Request reset email (always returns a generic success message) |
+| `POST /api/auth/reset-password` | Consume reset token + set new password (revokes all sessions) |
 | `GET /api/auth/me` | Validate token, return tenant profile |
 | `GET /api/leads` | List all leads for the signed-in dealer |
 | `POST /api/leads` | Create / upsert a lead (id, name, phone, shades, snapshot) |
