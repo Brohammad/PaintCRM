@@ -2,6 +2,10 @@ server/node_modules/
 server/coverage/
 paint-preview-app/node_modules/
 paint-preview-app/dist/
+e2e/node_modules/
+e2e/playwright-report/
+e2e/test-results/
+e2e/server.pid
 server/paintcrm.db
 server/paintcrm.db-shm
 server/paintcrm.db-wal
