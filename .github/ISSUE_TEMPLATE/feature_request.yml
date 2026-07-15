@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a high-impact product or engineering improvement
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Prefer items that strengthen engineering quality, UX, reliability, security, or startup readiness.
+        Check [BACKLOG.md](../../BACKLOG.md) first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who hurts today, and how?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Smallest useful version.
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Primary impact area
+      options:
+        - Product / UX
+        - Reliability
+        - Security
+        - Performance
+        - Developer experience
+        - Deployment / ops
+        - Open-source readiness
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this is objectively stronger
+      description: Would a dealer, recruiter, or maintainer care? Why?
+    validations:
+      required: true

@@ -68,6 +68,8 @@
         </div>
       </section>
 
+      <section id="onboardingChecklist" class="onboarding-wrap hidden" aria-label="Getting started checklist"></section>
+
       <section class="workspace-grid">
         <article class="canvas-panel">
           <header>
@@ -95,9 +97,13 @@
 
         <aside class="control-panel">
           <section>
-            <h3>Suggested Shades</h3>
-            <p class="muted">Auto-picked from your image. Search all brands below.</p>
-            <div id="suggestions" class="swatch-grid"></div>
+            <h3>Smart palette</h3>
+            <p id="smartPaletteHint" class="muted tiny">Upload a photo for shade picks matched to your room.</p>
+            <div id="aiPaletteRow" class="ai-palette-row hidden">
+              <input id="aiPalettePrompt" type="text" maxlength="280" placeholder="Describe the look — warm minimal, coastal…" autocomplete="off" />
+              <button id="aiPaletteBtn" type="button" class="button tiny ghost" disabled title="Smart palette from your photo">Smart picks</button>
+            </div>
+            <div id="suggestions" class="suggestion-grid"></div>
             <div class="shade-search-wrap">
               <input id="shadeSearch" type="search" placeholder="Search shades — e.g. Linen, Dulux, teal…" autocomplete="off" />
             </div>
@@ -274,8 +280,9 @@
             </label>
             <label class="field full" style="margin-bottom:10px;">
               <span>Password</span>
-              <input id="serverPassword" type="password" placeholder="min 6 characters" autocomplete="current-password" />
+              <input id="serverPassword" type="password" placeholder="min 8 characters" autocomplete="current-password" />
             </label>
+            <p class="muted tiny" style="margin-bottom:8px;"><a href="/login?forgot=1" style="color:var(--accent);">Forgot password?</a> · <a href="/login" style="color:var(--accent);">Reset with link</a></p>
             <p id="serverAuthError" class="muted tiny" style="color:#c0392b;margin-bottom:8px;min-height:16px;"></p>
             <button type="button" id="serverAuthBtn" class="button primary">Sign In</button>
           </div>

@@ -1,7 +1,7 @@
 // Load environment variables
 require('dotenv').config();
 
-// Refuse to start in production without a real JWT secret
+// Refuse to start in production without a real JWT secret and explicit CORS allowlist
 if (process.env.NODE_ENV === 'production') {
   const secret = process.env.JWT_SECRET || '';
   if (!secret || secret === 'dev_secret_change_me' || secret === 'change_this_in_production') {
@@ -12,10 +12,18 @@ if (process.env.NODE_ENV === 'production') {
     console.error('FATAL: JWT_SECRET must be at least 32 characters in production. Refusing to start.');
     process.exit(1);
   }
+  const origins = (process.env.ALLOWED_ORIGINS || '').trim();
+  if (!origins) {
+    console.error(
+      'FATAL: ALLOWED_ORIGINS must be set in production (comma-separated public origins). Refusing to start.'
+    );
+    process.exit(1);
+  }
 }
 
 const app = require('./app');
 const { closePool } = require('./lib/db');
+const { startReminderScheduler, stopReminderScheduler } = require('./jobs/reminders');
 
 const PORT = process.env.PORT || 3001;
 const server = app.listen(PORT, () => {
@@ -24,6 +32,7 @@ const server = app.listen(PORT, () => {
   console.log(`  Health: http://localhost:${PORT}/api/health`);
   console.log(`  Metrics: http://localhost:${PORT}/metrics`);
   console.log(`  Login: http://localhost:${PORT}/login`);
+  startReminderScheduler(console);
 });
 
 // Graceful shutdown
@@ -32,6 +41,7 @@ function shutdown(signal) {
   
   server.close(async () => {
     console.log('HTTP server closed');
+    stopReminderScheduler();
     
     try {
       await closePool();

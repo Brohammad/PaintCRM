@@ -9,20 +9,10 @@ const {
   revokeRefreshToken,
   revokeAllForTenant,
 } = require('../lib/tokens');
+const { passwordPolicyError } = require('../lib/passwordPolicy');
+const { requestReset, resetPassword } = require('../lib/passwordReset');
 
 const router = express.Router();
-
-// Password policy: at least 8 chars containing both a letter and a number.
-// Returns an error string, or null when the password is acceptable.
-function passwordPolicyError(password) {
-  if (typeof password !== 'string' || password.length < 8) {
-    return 'Password must be at least 8 characters';
-  }
-  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-    return 'Password must include at least one letter and one number';
-  }
-  return null;
-}
 
 // Validation middleware
 const validateRegistration = (req, res, next) => {
@@ -191,6 +181,47 @@ router.post('/logout-all', requireAuth, async (req, res, next) => {
   try {
     await revokeAllForTenant(req.tenant.id);
     res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res, next) => {
+  try {
+    const { email } = req.body || {};
+
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'email is required' });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    await requestReset(email, req.log);
+
+    res.json({ message: 'If that email is registered, we sent reset instructions.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const { token, password } = req.body || {};
+
+    if (!token || !password) {
+      return res.status(400).json({ error: 'token and password are required' });
+    }
+
+    const result = await resetPassword(token, password, req.log);
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.json({ message: 'Password updated. You can sign in.' });
   } catch (err) {
     next(err);
   }

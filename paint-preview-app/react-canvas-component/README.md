@@ -1,5 +1,8 @@
 # Hybrid Wall Recolor Component (React / Next.js)
 
+> **Optional extract — not used by the main PaintCRM Vite app.**  
+> The production UI lives in `paint-preview-app/script.js` + `src/`. Use this folder only if you are embedding the canvas in a separate React/Next project.
+
 This folder includes a client-side canvas component that combines:
 
 - Color-based region selection from clicked seed pixels

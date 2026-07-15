@@ -1205,12 +1205,13 @@ Intersection is preferred: DeepLab's "wall" semantic label is precise, and the h
 |---------|---------------|
 | Password storage | bcrypt, cost factor 12 (~150ms per hash — increased for production) |
 | Token transport | Bearer JWT in `Authorization` header (never in URL or cookie) |
-| Token TTL | 30 days; refresh tokens in roadmap for Phase 6 |
+| Token TTL | Access JWT ~15m (`ACCESS_TOKEN_TTL`); rotating refresh ~30d (`REFRESH_TOKEN_TTL_DAYS`), SHA-256 hashed at rest with reuse detection |
+| Password reset | Single-use SHA-256 tokens (`password_reset_tokens`), TTL via `PASSWORD_RESET_TTL_MINUTES`; generic API responses; SMTP optional (see `lib/mail.js`) |
 | JWT secret | Environment variable `JWT_SECRET` validated at startup; refuses to start if missing in production |
 | SQL injection | 100% parameterised queries via `pg` prepared statements; no string concatenation |
-| Tenant isolation | Every leads/events query filters by `tenant_id = req.tenant.id` |
-| CORS | Configurable via `ALLOWED_ORIGINS` env var; defaults to permissive only in development |
-| Rate limiting | `express-rate-limit`: 100 req/15min per IP; auth endpoints stricter: 10 req/hour |
+| Tenant isolation | Application-level: every tenant-owned query filters by `tenant_id = req.tenant.id` (RLS path documented in `docs/TENANCY.md`) |
+| CORS | `ALLOWED_ORIGINS` allowlist (comma-separated). Production refuses to boot if unset and denies unlisted cross-origin requests; development remains permissive |
+| Rate limiting | `express-rate-limit`: 100 req/15min per IP; auth + password-reset endpoints stricter: 10 req/hour |
 | Security headers | Helmet.js: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
 | Input validation | Manual field validation in each route; `eventType` whitelisted against a `Set` |
 | XSS protection | CSP directives restrict script sources; user content (snapshots) stored as base64, not rendered as HTML |
