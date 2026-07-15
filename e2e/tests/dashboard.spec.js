@@ -9,7 +9,7 @@ test.describe('dashboard / analytics smoke', () => {
     await expect(page.locator('#leadsModal')).toBeVisible();
     await page.locator('#analyticsTabBtn').click();
     await expect(page.locator('#analyticsPanel')).toBeVisible();
-    await page.locator('#closeLeads2Btn').click();
+    await page.locator('#closeLeadsBtn').click();
     await expect(page.locator('#leadsModal')).toBeHidden();
 
     await page.locator('#settingsBtn').click();
