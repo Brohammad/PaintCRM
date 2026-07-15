@@ -41,7 +41,7 @@ See [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) for the full 
 | P2-7 | Further extract canvas engine from `script.js` | Maintainability | Med | Med | Med |
 | P2-8 | Deduplicate client `palette.js` ↔ server `heuristic.js` | One ranking model | Low | Med | Low |
 | P2-9 | Neon/Fly backup restore drill documented + scheduled | Operator confidence | Med | Low | Low |
-| P2-10 | In-app first-run checklist (photo → lead → quote) | Reduce support | Med | Med | Low | **Done** |
+| P2-10 | In-app first-run checklist (photo → lead → quote) | Reduce support | Med | Med | Low | **Done** | **Done** |
 | P2-11 | OpenAPI `/api/docs` | Integrator DX | Med | Med | Low |
 | P2-12 | Remove or archive legacy Python `test-scripts/` | Less confusion vs `e2e/` | Low | Low | Low |
 | P2-13 | India DLT / MSG91 template compliance for SMS | Legal SMS in production | High | Med | Med |

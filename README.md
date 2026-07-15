@@ -80,6 +80,28 @@ Key frontend modules under test: wall segmentation, HSL tint, cost estimator, AP
 
 ---
 
+## Pilot program (for paint dealers)
+
+**Who it's for:** Independent paint shops running in-store colour consultations — especially where Wi‑Fi is unreliable and leads get lost on paper.
+
+**What you get today (free pilot):**
+
+| Capability | Value |
+|------------|-------|
+| 60-second wall preview | Customer decides faster at the counter |
+| Lead capture + sync | No lost walk-ins when you're busy |
+| Quotes → orders | Server-computed totals — tamper-proof |
+| Credit ledger + WhatsApp reminder | Follow up on receivables from the same app |
+| Offline-first | Works when the network doesn't |
+
+**How to start:** [Create an account](https://paintcrm.brohammad.tech/login) → follow the **Getting started** checklist (photo → lead → quote) → invite us for feedback.
+
+**What we're validating:** Do dealers use it weekly for leads and quotes? That's the gate before staff seats, automated SMS, and deeper CRM.
+
+**Release:** [v1.2.0](https://github.com/Brohammad/PaintCRM/releases/tag/v1.2.0) · [Changelog](CHANGELOG.md)
+
+---
+
 ## Demo in 60 seconds
 
 Use this flow for interviews, Loom recordings, or a live dealer walkthrough.

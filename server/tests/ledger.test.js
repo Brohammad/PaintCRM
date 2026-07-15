@@ -16,7 +16,7 @@ describe('Credit Ledger API', () => {
     return res.body.token;
   }
 
-  async function createCustomer(t = token, name = 'Ledger Customer', phone = '555-9090') {
+  async function createCustomer(t = token, name = 'Ledger Customer', phone = '9876543210') {
     const res = await request(app)
       .post('/api/customers')
       .set('Authorization', `Bearer ${t}`)
