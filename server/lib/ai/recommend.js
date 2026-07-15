@@ -186,7 +186,7 @@ async function recommendShades({
         fetchImpl,
       });
 
-      let suggestions = mapPicksToSuggestions(picks, candidateMap, validatedDominant, limit);
+      const suggestions = mapPicksToSuggestions(picks, candidateMap, validatedDominant, limit);
 
       if (suggestions.length < limit) {
         const pickedIds = new Set(suggestions.map((s) => s.id));

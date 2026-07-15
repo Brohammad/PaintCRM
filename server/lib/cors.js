@@ -6,7 +6,7 @@
  */
 
 function parseAllowedOrigins(envValue) {
-  if (envValue == null) return null;
+  if (envValue === null || envValue === undefined) return null;
   const list = String(envValue)
     .split(',')
     .map((o) => o.trim())

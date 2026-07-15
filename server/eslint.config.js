@@ -29,6 +29,10 @@ module.exports = [
         beforeEach: 'readonly',
         afterEach: 'readonly',
         global: 'readonly',
+        jest: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
       },
     },
     rules: {
