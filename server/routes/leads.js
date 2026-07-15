@@ -109,8 +109,8 @@ router.post("/", async (req, res, next) => {
     });
 
     const result = await query(
-      'SELECT * FROM leads WHERE id = $1',
-      [leadId]
+      'SELECT * FROM leads WHERE id = $1 AND tenant_id = $2',
+      [leadId, tenantId]
     );
 
     res.status(existing.rows.length > 0 ? 200 : 201).json({ lead: formatLead(result.rows[0]) });

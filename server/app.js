@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 
 const { register, httpRequestDuration, httpRequestErrors } = require('./lib/metrics');
+const { parseAllowedOrigins, createCorsOriginDelegate } = require('./lib/cors');
 
 // Picks the directory to serve the frontend from: an explicit FRONTEND_DIR
 // override, else the Vite build output if present, else the raw source.
@@ -41,8 +42,13 @@ app.use(helmet({
   },
 }));
 
+// Production requires ALLOWED_ORIGINS (enforced at boot in index.js).
+// Without it, cross-origin browser requests are denied — never silent `*`.
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+  origin: createCorsOriginDelegate({
+    allowedOrigins: parseAllowedOrigins(process.env.ALLOWED_ORIGINS),
+    nodeEnv: process.env.NODE_ENV || 'development',
+  }),
   credentials: true,
 }));
 
@@ -102,13 +108,15 @@ if (rateLimitingEnabled) {
   });
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/register', authLimiter);
+  app.use('/api/auth/forgot-password', authLimiter);
+  app.use('/api/auth/reset-password', authLimiter);
 }
 
 // Structured logging
 const logger = pinoHttp({
   level: process.env.LOG_LEVEL || 'info',
   redact: {
-    paths: ['req.headers.authorization', 'req.body.password'],
+    paths: ['req.headers.authorization', 'req.body.password', 'req.body.token'],
     remove: true,
   },
 });
@@ -153,6 +161,7 @@ app.use('/api/quotes', require('./routes/quotes'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/ledger', require('./routes/ledger'));
+app.use('/api/ai', require('./routes/ai'));
 
 // Health probes
 app.get('/api/health', async (req, res) => {

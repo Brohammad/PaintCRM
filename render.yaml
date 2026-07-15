@@ -9,12 +9,25 @@
 # The Docker image (server/Dockerfile) builds the frontend and, on start, runs
 # migrations then boots the server. Render injects PORT automatically and the
 # app binds to it (index.js uses process.env.PORT).
+#
+# BRANCH POLICY
+# -------------
+# `branch` is intentionally pinned to the branch that currently powers the
+# public demo (paintcrm.brohammad.tech). Do NOT silently flip this to `main`
+# without verifying that main has the same deploy-critical fixes — a mismatch
+# will auto-deploy a different tree on the next push.
+#
+# When the demo-stable work is merged to main:
+#   1. Change `branch` below to `main`
+#   2. Confirm ALLOWED_ORIGINS still matches the live custom domain + Render URL
+#   3. Watch the first auto-deploy health check
 services:
   - type: web
     name: paintcrm
     runtime: docker
     plan: free
     region: singapore
+    # Demo-stable branch (see BRANCH POLICY above). Revisit when merging to main.
     branch: cursor/fix-production-hardening-issues
     dockerfilePath: ./server/Dockerfile
     dockerContext: .
@@ -23,7 +36,7 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # Public URL(s) allowed by CORS (comma-separated).
+      # Public URL(s) allowed by CORS (comma-separated). Required at boot.
       - key: ALLOWED_ORIGINS
         value: https://paintcrm.brohammad.tech,https://paintcrm-5k17.onrender.com
       # Auto-generated secure secret (>=32 chars satisfies the production guard).

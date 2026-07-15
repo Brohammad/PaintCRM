@@ -230,8 +230,9 @@ async function convertQuoteToOrder(tenantId, quoteId) {
     await insertItems(client, tenantId, 'order_items', 'order_id', orderId, items);
 
     await client.query(
-      `UPDATE quotes SET status = 'converted', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-      [quoteId]
+      `UPDATE quotes SET status = 'converted', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND tenant_id = $2`,
+      [quoteId, tenantId]
     );
 
     // Post the order total to the customer's credit ledger.

@@ -279,6 +279,7 @@
         <div class="field">
           <label for="loginPassword">Password</label>
           <input id="loginPassword" type="password" placeholder="••••••" required autocomplete="current-password" />
+          <p class="hint"><a href="#" id="forgotLink">Forgot password?</a></p>
         </div>
         <button type="submit" class="btn-primary" id="loginBtn">Sign In</button>
         <p class="hint">Your leads and analytics will sync across devices.</p>
@@ -304,10 +305,36 @@
         </div>
         <div class="field">
           <label for="regPassword">Password <span style="color:var(--danger)">*</span></label>
-          <input id="regPassword" type="password" placeholder="Min 6 characters" required minlength="6" autocomplete="new-password" />
-          <p class="hint">At least 6 characters. You'll use this to sign in on any device.</p>
+          <input id="regPassword" type="password" placeholder="Min 8 characters" required minlength="8" autocomplete="new-password" />
+          <p class="hint">At least 8 characters with one letter and one number.</p>
         </div>
         <button type="submit" class="btn-primary" id="registerBtn">Create Account</button>
+      </form>
+
+      <!-- Forgot Password Form -->
+      <form id="forgotForm" class="form-section" autocomplete="off">
+        <a href="#" class="back-link" id="backFromForgot">← Back to sign in</a>
+        <div class="field">
+          <label for="forgotEmail">Email</label>
+          <input id="forgotEmail" type="email" placeholder="you@shop.com" required autocomplete="email" />
+          <p class="hint">We'll send reset instructions if this email is registered.</p>
+        </div>
+        <button type="submit" class="btn-primary" id="forgotBtn">Send Reset Link</button>
+      </form>
+
+      <!-- Reset Password Form (shown when ?token= is present) -->
+      <form id="resetForm" class="form-section" autocomplete="off">
+        <a href="/login" class="back-link">← Back to sign in</a>
+        <div class="field">
+          <label for="resetPassword">New Password</label>
+          <input id="resetPassword" type="password" placeholder="Min 8 characters" required minlength="8" autocomplete="new-password" />
+          <p class="hint">At least 8 characters with one letter and one number.</p>
+        </div>
+        <div class="field">
+          <label for="resetPasswordConfirm">Confirm Password</label>
+          <input id="resetPasswordConfirm" type="password" placeholder="Repeat password" required minlength="8" autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn-primary" id="resetBtn">Update Password</button>
       </form>
 
       <div class="divider"></div>
@@ -325,30 +352,78 @@
     const tabRegister = document.getElementById('tabRegister');
     const signInForm = document.getElementById('signInForm');
     const registerForm = document.getElementById('registerForm');
+    const forgotForm = document.getElementById('forgotForm');
+    const resetForm = document.getElementById('resetForm');
+    const tabsEl = document.querySelector('.tabs');
     const messageEl = document.getElementById('message');
+    const urlParams = new URLSearchParams(location.search);
+    const resetToken = urlParams.get('token');
 
-    function showTab(tab) {
+    function hideAllForms() {
+      signInForm.classList.remove('active');
+      registerForm.classList.remove('active');
+      forgotForm.classList.remove('active');
+      resetForm.classList.remove('active');
+    }
+
+    function showView(view) {
       messageEl.className = 'message';
       messageEl.textContent = '';
-      if (tab === 'signin') {
-        tabSignIn.classList.add('active');
-        tabSignIn.setAttribute('aria-selected', 'true');
-        tabRegister.classList.remove('active');
-        tabRegister.setAttribute('aria-selected', 'false');
-        signInForm.classList.add('active');
-        registerForm.classList.remove('active');
-      } else {
+      hideAllForms();
+
+      if (view === 'reset') {
+        tabsEl.style.display = 'none';
+        resetForm.classList.add('active');
+        return;
+      }
+
+      if (view === 'forgot') {
+        tabsEl.style.display = 'none';
+        forgotForm.classList.add('active');
+        return;
+      }
+
+      tabsEl.style.display = '';
+      if (view === 'register') {
         tabRegister.classList.add('active');
         tabRegister.setAttribute('aria-selected', 'true');
         tabSignIn.classList.remove('active');
         tabSignIn.setAttribute('aria-selected', 'false');
         registerForm.classList.add('active');
-        signInForm.classList.remove('active');
+      } else {
+        tabSignIn.classList.add('active');
+        tabSignIn.setAttribute('aria-selected', 'true');
+        tabRegister.classList.remove('active');
+        tabRegister.setAttribute('aria-selected', 'false');
+        signInForm.classList.add('active');
       }
+    }
+
+    function showTab(tab) {
+      showView(tab === 'register' ? 'register' : 'signin');
     }
 
     tabSignIn.addEventListener('click', () => showTab('signin'));
     tabRegister.addEventListener('click', () => showTab('register'));
+
+    document.getElementById('forgotLink').addEventListener('click', (e) => {
+      e.preventDefault();
+      showView('forgot');
+      document.getElementById('forgotEmail').focus();
+    });
+
+    document.getElementById('backFromForgot').addEventListener('click', (e) => {
+      e.preventDefault();
+      showView('signin');
+    });
+
+    if (resetToken) {
+      showView('reset');
+      document.getElementById('resetPassword').focus();
+    } else if (urlParams.get('forgot') === '1') {
+      showView('forgot');
+      document.getElementById('forgotEmail').focus();
+    }
 
     // API helpers
     async function apiPost(path, body) {
@@ -430,8 +505,8 @@
       const password = document.getElementById('regPassword').value;
       const btn = document.getElementById('registerBtn');
 
-      if (password.length < 6) {
-        showError('Password must be at least 6 characters.');
+      if (password.length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+        showError('Password must be at least 8 characters with one letter and one number.');
         return;
       }
 
@@ -461,8 +536,68 @@
       }, 600);
     });
 
+    // Forgot password
+    forgotForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('forgotEmail').value.trim();
+      const btn = document.getElementById('forgotBtn');
+
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+
+      const { ok, data } = await apiPost('/auth/forgot-password', { email });
+
+      btn.disabled = false;
+      btn.textContent = 'Send Reset Link';
+
+      if (!ok) {
+        showError(data?.error || 'Could not send reset instructions. Please try again.');
+        return;
+      }
+
+      showSuccess(data.message || 'If that email is registered, we sent reset instructions.');
+    });
+
+    // Reset password
+    resetForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('resetPassword').value;
+      const confirm = document.getElementById('resetPasswordConfirm').value;
+      const btn = document.getElementById('resetBtn');
+
+      if (password !== confirm) {
+        showError('Passwords do not match.');
+        return;
+      }
+
+      if (password.length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+        showError('Password must be at least 8 characters with one letter and one number.');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Updating…';
+
+      const { ok, data } = await apiPost('/auth/reset-password', { token: resetToken, password });
+
+      btn.disabled = false;
+      btn.textContent = 'Update Password';
+
+      if (!ok) {
+        showError(data?.error || 'Invalid or expired reset link. Please request a new one.');
+        return;
+      }
+
+      showSuccess(data.message || 'Password updated. Redirecting to sign in…');
+      setTimeout(() => {
+        location.href = '/login';
+      }, 1200);
+    });
+
     // Auto-focus first field
-    document.getElementById('loginEmail').focus();
+    if (!resetToken && urlParams.get('forgot') !== '1') {
+      document.getElementById('loginEmail').focus();
+    }
   </script>
 </body>
 </html>
