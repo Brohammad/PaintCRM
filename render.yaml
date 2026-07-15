@@ -27,8 +27,8 @@ services:
     runtime: docker
     plan: free
     region: singapore
-    # Demo-stable branch (see BRANCH POLICY above). Revisit when merging to main.
-    branch: cursor/fix-production-hardening-issues
+    # Demo tracks main after merge. Flip only for emergency hotfixes.
+    branch: main
     dockerfilePath: ./server/Dockerfile
     dockerContext: .
     healthCheckPath: /api/health

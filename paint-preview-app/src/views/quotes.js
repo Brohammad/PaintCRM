@@ -16,6 +16,7 @@ export function createQuotesView({
   getCatalog,
   roomSqM,
   coverageSqMPerL,
+  onQuoteCreated,
 }) {
   let commerceTab = 'quotes';
   let editingQuoteId = null;
@@ -286,6 +287,7 @@ export function createQuotesView({
     const wasEditing = editingQuoteId;
     closeQuoteForm();
     showTransientToast(wasEditing ? 'Quote updated.' : 'Quote created.');
+    if (!wasEditing) onQuoteCreated?.();
     commerceTab = 'quotes';
     if (els.docStatusFilter) els.docStatusFilter.value = '';
     buildStatusFilter();

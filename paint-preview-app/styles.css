@@ -1380,6 +1380,79 @@ body {
 }
 .ledger-reminders li .status-badge { margin-right: 6px; }
 
+/* First-run checklist — one job: guide photo → lead → quote */
+.onboarding-wrap {
+  margin: 0;
+}
+.onboarding-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+.onboarding-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.onboarding-head h2 {
+  font-family: "Fraunces", serif;
+  font-size: 1.25rem;
+  margin: 2px 0 4px;
+}
+.onboarding-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.onboarding-step {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+}
+.onboarding-step.is-done {
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  border-color: var(--accent-soft);
+}
+.onboarding-check {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.onboarding-step.is-done .onboarding-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.onboarding-step p {
+  margin: 2px 0 0;
+}
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.button.tiny {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
 /* "Load more" pager row shared by paginated lists */
 .load-more-row {
   display: flex;

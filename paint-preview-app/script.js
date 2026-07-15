@@ -40,6 +40,7 @@ import { estimatePaint } from "./src/cost.js";
 import { generateLeadId, generateEventId } from "./src/ids.js";
 import { buildSmartSuggestions, roomMoodSummary } from "./src/palette.js";
 import { showTransientToast } from "./src/app/toast.js";
+import { createOnboardingChecklist } from "./src/app/onboardingChecklist.js";
 import { createLedgerView } from "./src/views/ledger.js";
 import { createQuotesView } from "./src/views/quotes.js";
 import { createInventoryView } from "./src/views/inventory.js";
@@ -1204,6 +1205,7 @@ function handleImageUpload(file) {
       state.originalImage = img;
       startPilotSession(); // Phase 3: begin a new pilot session
       initializeShadesFromImage();
+      onboardingChecklist?.complete("photo");
       updateRestoreDraftUI();
     };
     img.src = reader.result;
@@ -1406,6 +1408,7 @@ function captureLeadFromForm(e) {
   syncLeadToServer(lead);     // Phase 4: best-effort server sync
   closeContactModal();
 
+  onboardingChecklist?.complete("lead");
   showTransientToast(`Lead saved for ${name}. View in Leads inbox.`);
 }
 
@@ -2074,6 +2077,14 @@ const quotesView = createQuotesView({
   getCatalog: () => SHADE_CATALOG,
   roomSqM: ROOM_SQ_M,
   coverageSqMPerL: COVERAGE_SQ_M_PER_L,
+  onQuoteCreated: () => onboardingChecklist?.complete("quote"),
+});
+
+let onboardingChecklist = createOnboardingChecklist({
+  rootEl: document.getElementById("onboardingChecklist"),
+  getApiToken,
+  onOpenQuotes: () => quotesView.openQuotesModal(),
+  onOpenContact: () => openContactModal(),
 });
 
 const inventoryView = createInventoryView({
@@ -2613,6 +2624,7 @@ customersView.wireListeners();
 quotesView.wireListeners();
 inventoryView.wireListeners();
 ledgerView.wireListeners();
+onboardingChecklist?.render();
 
 // Phase 3: leads modal tab buttons
 const leadsTabBtn = document.getElementById("leadsTabBtn");
