@@ -1,4 +1,4 @@
-import { escHtml, fmtMoney, round2 } from "./src/utils.js";
+import { escHtml, fmtMoney } from "./src/utils.js";
 import {
   apiRequest,
   getApiToken,
@@ -35,11 +35,15 @@ import {
   toAlphaMask,
   createFeatheredAlphaMask,
   applyTint,
-  buildSuggestions,
 } from "./src/tint.js";
 import { estimatePaint } from "./src/cost.js";
-import { statusBadge, overdueDaysLabel, balanceSummaryLine } from "./src/format.js";
 import { generateLeadId, generateEventId } from "./src/ids.js";
+import { buildSmartSuggestions, roomMoodSummary } from "./src/palette.js";
+import { showTransientToast } from "./src/app/toast.js";
+import { createLedgerView } from "./src/views/ledger.js";
+import { createQuotesView } from "./src/views/quotes.js";
+import { createInventoryView } from "./src/views/inventory.js";
+import { createCustomersView } from "./src/views/customers.js";
 
 const imageInput = document.getElementById("imageInput");
 const exportBtn = document.getElementById("exportBtn");
@@ -132,10 +136,7 @@ const siteForm = document.getElementById("siteForm");
 const closeSiteBtn = document.getElementById("closeSiteBtn");
 const cancelSiteBtn = document.getElementById("cancelSiteBtn");
 
-let crmCustomers = [];
-let currentCustomerId = null;
-let currentCustomerObj = null;
-let editingCustomerId = null;
+let customersView;
 
 // Phase 6 commerce elements (Quotes & Orders)
 const quotesBtn = document.getElementById("quotesBtn");
@@ -171,10 +172,6 @@ const docDetailBody = document.getElementById("docDetailBody");
 const docDetailActions = document.getElementById("docDetailActions");
 const closeDocDetailBtn = document.getElementById("closeDocDetailBtn");
 
-let commerceTab = "quotes";
-let editingQuoteId = null;
-let currentDoc = null;
-
 // Phase 6 inventory elements
 const inventoryBtn = document.getElementById("inventoryBtn");
 const inventoryModal = document.getElementById("inventoryModal");
@@ -204,10 +201,6 @@ const editInventoryBtn = document.getElementById("editInventoryBtn");
 const closeInventoryDetailBtn = document.getElementById("closeInventoryDetailBtn");
 const closeInventoryDetail2Btn = document.getElementById("closeInventoryDetail2Btn");
 
-let editingInventoryId = null;
-let currentInventoryId = null;
-let currentInventoryObj = null;
-
 // Phase 6 credit-ledger elements
 const ledgerBtn = document.getElementById("ledgerBtn");
 const ledgerModal = document.getElementById("ledgerModal");
@@ -225,7 +218,27 @@ const ledgerDetailBody = document.getElementById("ledgerDetailBody");
 const closeLedgerDetailBtn = document.getElementById("closeLedgerDetailBtn");
 const closeLedgerDetail2Btn = document.getElementById("closeLedgerDetail2Btn");
 
-let currentLedgerCustomerId = null;
+const ledgerView = createLedgerView({
+  els: {
+    ledgerBtn,
+    ledgerModal,
+    ledgerSignInPrompt,
+    ledgerPanel,
+    ledgerSummary,
+    ledgerSearchInput,
+    ledgerFilter,
+    ledgerList,
+    closeLedgerBtn,
+    closeLedger2Btn,
+    ledgerDetailModal,
+    ledgerDetailTitle,
+    ledgerDetailBody,
+    closeLedgerDetailBtn,
+    closeLedgerDetail2Btn,
+  },
+  apiRequest,
+  getApiToken,
+});
 
 const canvasWrap = document.getElementById("canvasWrap");
 const previewCanvas = document.getElementById("previewCanvas");
@@ -237,6 +250,10 @@ const compareCtx = compareCanvas.getContext("2d", { willReadFrequently: true });
 const brushCursorCtx = brushCursorCanvas.getContext("2d");
 
 const suggestionsEl = document.getElementById("suggestions");
+const smartPaletteHintEl = document.getElementById("smartPaletteHint");
+const aiPaletteRowEl = document.getElementById("aiPaletteRow");
+const aiPalettePromptEl = document.getElementById("aiPalettePrompt");
+const aiPaletteBtnEl = document.getElementById("aiPaletteBtn");
 const compareSuggestionsEl = document.getElementById("compareSuggestions");
 const zoneTabsEl = document.getElementById("zoneTabs");
 const activeSwatchEl = document.getElementById("activeSwatch");
@@ -272,6 +289,7 @@ const state = {
   originalImage: null,
   originalPixels: null,
   imageRect: null,
+  dominantRgb: null,
   shades: [],
   activeShade: null,
   compareShade: null,
@@ -310,7 +328,6 @@ function exitGuestMode() {
 }
 
 // Phase 5: CRM offline cache
-const CUSTOMERS_CACHE_KEY = "paintcrm_customers_cache_v1";
 let apiTenant = null; // { id, shopName, dealerName, phone, email }
 
 let analyticsEvents = [];
@@ -634,6 +651,48 @@ function renderSwatches(container, shades, onClick, activeHex) {
   });
 }
 
+function renderSmartSuggestions(container, shades, onClick, activeHex) {
+  container.innerHTML = "";
+  shades.forEach((shade, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "suggestion-card";
+    if (shade.hex === activeHex) button.classList.add("active");
+
+    const swatch = document.createElement("span");
+    swatch.className = "suggestion-swatch";
+    swatch.style.background = shade.hex;
+
+    const meta = document.createElement("span");
+    meta.className = "suggestion-meta";
+
+    const name = document.createElement("span");
+    name.className = "suggestion-name";
+    name.textContent = shade.name;
+
+    const brand = document.createElement("span");
+    brand.className = "suggestion-brand muted tiny";
+    brand.textContent = shade.brand || "";
+
+    const cost = document.createElement("span");
+    cost.className = "suggestion-cost tiny";
+    if (shade.estimate?.totalInr) {
+      cost.textContent = `~₹${shade.estimate.totalInr.toLocaleString("en-IN")} · ${shade.estimate.litres}L`;
+    } else {
+      cost.textContent = shade.hex;
+    }
+
+    const mood = document.createElement("span");
+    mood.className = "suggestion-mood tiny muted";
+    mood.textContent = shade.reason || shade.moodLabel || (index === 0 ? "Best match" : "");
+
+    meta.append(name, brand, cost, mood);
+    button.append(swatch, meta);
+    button.addEventListener("click", () => onClick(shade));
+    container.appendChild(button);
+  });
+}
+
 function setActiveShade(shade) {
   state.activeShade = shade;
   const zone = getActiveZone();
@@ -649,7 +708,7 @@ function setActiveShade(shade) {
       : "";
   }
   updateCostEstimate(entry);
-  renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
+  renderSmartSuggestions(suggestionsEl, state.shades, setActiveShade, shade.hex);
   trackShadeSelected(entry); // Phase 3: track decision event
   drawPreview();
   saveDraft();
@@ -679,7 +738,7 @@ function setActiveZone(zoneId) {
   updateCostEstimate(entry);
 
   renderZoneTabs();
-  renderSwatches(suggestionsEl, state.shades, setActiveShade, shade.hex);
+  renderSmartSuggestions(suggestionsEl, state.shades, setActiveShade, shade.hex);
   updateMaskStatus();
   drawPreview();
   saveDraft();
@@ -1027,12 +1086,84 @@ function removeActiveWallTab() {
   saveDraft();
 }
 
+function updateAiPaletteControls() {
+  const hasPhoto = Boolean(state.dominantRgb);
+  const signedIn = Boolean(getApiToken());
+
+  if (aiPaletteRowEl) {
+    aiPaletteRowEl.classList.toggle("hidden", !hasPhoto);
+  }
+
+  if (aiPaletteBtnEl) {
+    // Guests get server heuristic ranking; signed-in dealers may get OpenAI when configured.
+    aiPaletteBtnEl.disabled = !hasPhoto;
+    aiPaletteBtnEl.title = signedIn
+      ? "Refine picks (OpenAI when configured; otherwise smart heuristic)"
+      : "Smart palette from your photo (sign in for optional OpenAI refinement)";
+  }
+}
+
+async function fetchAiRecommendations() {
+  if (!state.dominantRgb) return;
+
+  const prompt = aiPalettePromptEl?.value?.trim() || "";
+  if (aiPaletteBtnEl) {
+    aiPaletteBtnEl.disabled = true;
+    aiPaletteBtnEl.textContent = "Thinking…";
+  }
+
+  const { data, error } = await apiRequest("POST", "/api/ai/recommend-shades", {
+    dominant: state.dominantRgb,
+    prompt,
+    limit: 6,
+  });
+
+  if (aiPaletteBtnEl) {
+    aiPaletteBtnEl.textContent = "Smart picks";
+    updateAiPaletteControls();
+  }
+
+  if (error || !data?.suggestions?.length) {
+    showTransientToast(error || "Could not fetch palette picks — try again.");
+    return;
+  }
+
+  state.shades = data.suggestions;
+  if (smartPaletteHintEl && data.summary) {
+    smartPaletteHintEl.textContent = data.summary;
+  }
+
+  state.activeShade = state.shades[0];
+  state.compareShade = state.shades[1] || state.shades[0];
+  const zone = getActiveZone();
+  if (zone) zone.shadeHex = state.activeShade.hex;
+
+  renderSmartSuggestions(suggestionsEl, state.shades, setActiveShade, state.activeShade.hex);
+  renderSwatches(compareSuggestionsEl, state.shades, setCompareShade, state.compareShade.hex);
+  activeSwatchEl.style.background = state.activeShade.hex;
+  activeShadeNameEl.textContent = state.activeShade.name;
+  activeShadeHexEl.textContent = state.activeShade.hex;
+  updateCostEstimate(catalogEntry(state.activeShade));
+  drawPreview();
+  saveDraft();
+
+  showTransientToast(
+    data.source === "openai" ? "AI shade picks applied." : "Smart palette picks applied.",
+  );
+}
+
 function initializeShadesFromImage() {
   const fit = drawImageFit(previewCtx, state.originalImage, previewCanvas);
   const pixels = previewCtx.getImageData(fit.dx, fit.dy, fit.drawWidth, fit.drawHeight);
   const dominant = averageColorSample(pixels);
+  state.dominantRgb = dominant;
 
-  state.shades = buildSuggestions(dominant, SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES);
+  const catalog = SHADE_CATALOG.length ? SHADE_CATALOG : FALLBACK_SWATCHES;
+  state.shades = buildSmartSuggestions(dominant, catalog);
+  if (smartPaletteHintEl) {
+    smartPaletteHintEl.textContent = roomMoodSummary(state.shades[0]?.roomMoods || []);
+  }
+  updateAiPaletteControls();
   state.activeShade = state.shades[0];
   state.compareShade = state.shades[1] || state.shades[0];
 
@@ -1040,7 +1171,7 @@ function initializeShadesFromImage() {
   state.activeZoneId = state.zones[0].id;
   state.mlMask = null;
 
-  renderSwatches(suggestionsEl, state.shades, setActiveShade, state.activeShade.hex);
+  renderSmartSuggestions(suggestionsEl, state.shades, setActiveShade, state.activeShade.hex);
   renderSwatches(compareSuggestionsEl, state.shades, setCompareShade, state.compareShade.hex);
   renderZoneTabs();
 
@@ -1175,7 +1306,7 @@ function runShadeSearch(query) {
         state.shades.unshift(s);
         state.shades = state.shades.slice(0, 6);
       }
-      renderSwatches(suggestionsEl, state.shades, setActiveShade, s.hex);
+      renderSmartSuggestions(suggestionsEl, state.shades, setActiveShade, s.hex);
     });
     shadeSearchResults.appendChild(btn);
   });
@@ -1228,7 +1359,7 @@ function openContactModal() {
 
   contactModal.classList.remove("hidden");
   trackContactOpened(); // Phase 3
-  populateLeadCrmFields();
+  customersView.populateLeadCrmFields();
   setTimeout(() => leadNameInput.focus(), 0);
 }
 
@@ -1276,18 +1407,6 @@ function captureLeadFromForm(e) {
   closeContactModal();
 
   showTransientToast(`Lead saved for ${name}. View in Leads inbox.`);
-}
-
-function showTransientToast(msg) {
-  const t = document.createElement("div");
-  t.textContent = msg;
-  t.style.cssText = "position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1d1d1f;color:#fff;padding:10px 16px;border-radius:999px;font-size:0.9rem;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:2000;";
-  document.body.appendChild(t);
-  setTimeout(() => {
-    t.style.transition = "opacity 160ms ease";
-    t.style.opacity = "0";
-    setTimeout(() => t.remove(), 160);
-  }, 1600);
 }
 
 function openLeadsModal() {
@@ -1385,30 +1504,10 @@ function openLeadDetail(leadId) {
 
   const viewCustomerBtn = document.getElementById("viewCustomerFromLeadBtn");
   if (viewCustomerBtn) {
-    viewCustomerBtn.addEventListener("click", () => openCustomerFromLead(lead));
+    viewCustomerBtn.addEventListener("click", () => customersView.openCustomerFromLead(lead));
   }
 
   leadDetailModal.classList.remove("hidden");
-}
-
-async function openCustomerFromLead(lead) {
-  if (!getApiToken()) return;
-  let customerId = lead.customerId;
-
-  // Fallback: locally captured lead not yet linked — match by phone on the server
-  if (!customerId && lead.phone) {
-    const { data } = await apiRequest("GET", `/api/customers?q=${encodeURIComponent(lead.phone)}`);
-    const match = (data?.customers || []).find((c) => c.phone === lead.phone);
-    customerId = match?.id || null;
-  }
-
-  if (!customerId) {
-    showTransientToast("No linked customer yet. Sync this lead first.");
-    return;
-  }
-
-  closeLeadDetail();
-  openCustomerDetail(customerId);
 }
 
 function closeLeadDetail() {
@@ -1599,6 +1698,9 @@ function clearSession() {
   if (costEstimateEl) costEstimateEl.classList.add("hidden");
   if (shadeSearchResults) { shadeSearchResults.innerHTML = ""; shadeSearchResults.classList.add("hidden"); }
   if (shadeSearchInput) shadeSearchInput.value = "";
+  state.dominantRgb = null;
+  if (aiPalettePromptEl) aiPalettePromptEl.value = "";
+  updateAiPaletteControls();
 
   beforeAfterToggle.checked = false;
   compareToggle.checked = false;
@@ -1618,11 +1720,8 @@ function clearSession() {
 // any cached CRM data so nothing leaks across sign-ins.
 function clearApiToken() {
   clearTokens();
-  try {
-    localStorage.removeItem(CUSTOMERS_CACHE_KEY);
-  } catch { /* nothing */ }
+  customersView?.clearCache();
   apiTenant = null;
-  crmCustomers = [];
 }
 
 // The app is gated behind sign-in, so send unauthenticated users to the login
@@ -1636,8 +1735,7 @@ function redirectToLogin() {
 // When a session can no longer be refreshed, reset state and return to login.
 setUnauthorizedHandler(() => {
   apiTenant = null;
-  crmCustomers = [];
-  try { localStorage.removeItem(CUSTOMERS_CACHE_KEY); } catch { /* nothing */ }
+  customersView?.clearCache();
   if (typeof updateServerSyncUI === "function") updateServerSyncUI();
   redirectToLogin();
 });
@@ -1842,6 +1940,8 @@ function updateServerSyncUI() {
     if (loginSection) loginSection.classList.remove("hidden");
     if (loggedInSection) loggedInSection.classList.add("hidden");
   }
+
+  updateAiPaletteControls();
 }
 
 // Handle the login / register form in Settings modal
@@ -1894,1259 +1994,122 @@ async function syncPreviewSessionToServer(sessionType, extra = {}) {
   }).catch(() => { /* best-effort */ });
 }
 
-function saveCustomersCache(list) {
-  try { safeLsSet(CUSTOMERS_CACHE_KEY, JSON.stringify(list || [])); } catch { /* storage full */ }
-}
-
-function loadCustomersCache() {
-  try {
-    const raw = localStorage.getItem(CUSTOMERS_CACHE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function hasCustomersCache() {
-  return loadCustomersCache().length > 0;
-}
-
-// Fetch customers from server; falls back to (and refreshes) the local cache.
-async function fetchCustomers(q = "") {
-  if (!getApiToken()) {
-    const cached = loadCustomersCache();
-    return filterCustomersLocally(cached, q);
-  }
-  const path = q ? `/api/customers?q=${encodeURIComponent(q)}` : "/api/customers";
-  const { data, error } = await apiRequest("GET", path);
-  if (error || !data?.customers) {
-    // Offline / server error — serve from cache so CRM stays usable
-    return filterCustomersLocally(loadCustomersCache(), q);
-  }
-  crmCustomers = data.customers;
-  if (!q) saveCustomersCache(crmCustomers); // only cache the full list
-  return crmCustomers;
-}
-
-function filterCustomersLocally(list, q) {
-  const needle = (q || "").trim().toLowerCase();
-  if (!needle) return list;
-  return list.filter((c) =>
-    [c.name, c.phone, c.email].some((v) => (v || "").toLowerCase().includes(needle))
-  );
-}
-
-async function populateLeadCrmFields() {
-  const signedIn = !!getApiToken();
-  if (leadCustomerField) leadCustomerField.classList.toggle("hidden", !signedIn);
-  if (leadSiteField) leadSiteField.classList.toggle("hidden", !signedIn);
-  if (!signedIn || !leadCustomerSelect) return;
-
-  const customers = await fetchCustomers();
-  leadCustomerSelect.innerHTML = `<option value="">New customer (auto-create from phone)</option>`;
-  customers.forEach((c) => {
-    const opt = document.createElement("option");
-    opt.value = c.id;
-    opt.textContent = `${c.name} — ${c.phone}`;
-    leadCustomerSelect.appendChild(opt);
-  });
-  if (leadSiteSelect) {
-    leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
-  }
-}
-
-async function populateLeadSites(customerId) {
-  if (!leadSiteSelect || !customerId) {
-    if (leadSiteSelect) leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
-    return;
-  }
-  const { data, error } = await apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`);
-  leadSiteSelect.innerHTML = `<option value="">No site selected</option>`;
-  if (error || !data?.sites) return;
-  data.sites.forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.id;
-    opt.textContent = s.name;
-    leadSiteSelect.appendChild(opt);
-  });
-}
-
-function openCustomersModal() {
-  if (!customersModal) return;
-  const signedIn = !!getApiToken();
-  const showPanel = signedIn || hasCustomersCache();
-  if (customersSignInPrompt) customersSignInPrompt.style.display = showPanel ? "none" : "block";
-  if (customersPanel) customersPanel.style.display = showPanel ? "block" : "none";
-  // + New requires a live connection (writes go to server)
-  if (newCustomerBtn) newCustomerBtn.style.display = signedIn ? "" : "none";
-  customersModal.classList.remove("hidden");
-  if (showPanel) renderCustomersList();
-}
-
-function closeCustomersModal() {
-  if (customersModal) customersModal.classList.add("hidden");
-}
-
-async function renderCustomersList(q = "") {
-  if (!customersListEl) return;
-  customersListEl.innerHTML = `<p class="muted tiny">Loading…</p>`;
-  const customers = await fetchCustomers(q);
-  customersListEl.innerHTML = "";
-  if (!customers.length) {
-    customersListEl.innerHTML = `<p class="muted" style="padding:12px;">No customers yet. Save a lead or tap + New.</p>`;
-    return;
-  }
-  customers.forEach((c) => {
-    const card = document.createElement("div");
-    card.className = "customer-card";
-    card.innerHTML = `
-      <div>
-        <div class="name">${c.name}</div>
-        <div class="phone">${c.phone}</div>
-      </div>
-      <div class="stats">${c.leadCount || 0} leads<br>${c.siteCount || 0} sites</div>
-    `;
-    card.addEventListener("click", () => {
-      closeCustomersModal();
-      openCustomerDetail(c.id);
-    });
-    customersListEl.appendChild(card);
-  });
-}
-
-async function openCustomerDetail(customerId) {
-  if (!customerDetailModal || !customerDetailBody) return;
-  currentCustomerId = customerId;
-  customerDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
-  customerDetailModal.classList.remove("hidden");
-
-  const online = !!getApiToken();
-  const canManage = online;
-  if (deleteCustomerBtn) deleteCustomerBtn.style.display = canManage ? "" : "none";
-  if (editCustomerBtn) editCustomerBtn.style.display = canManage ? "" : "none";
-  if (addSiteBtn) addSiteBtn.style.display = canManage ? "" : "none";
-
-  // Offline: render from the cached list only
-  if (!online) {
-    const cached = loadCustomersCache().find((c) => c.id === customerId);
-    if (!cached) {
-      customerDetailBody.innerHTML = `<p class="muted">Sign in to view this customer's full profile.</p>`;
-      return;
-    }
-    renderCustomerDetail(cached, [], [], { offline: true });
-    return;
-  }
-
-  const [customerRes, sitesRes, timelineRes] = await Promise.all([
-    apiRequest("GET", `/api/customers/${customerId}`),
-    apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`),
-    apiRequest("GET", `/api/customers/${customerId}/timeline`),
-  ]);
-
-  const customer = customerRes.data?.customer;
-  const sites = sitesRes.data?.sites || [];
-  const timeline = timelineRes.data?.timeline || [];
-  if (!customer) {
-    customerDetailBody.innerHTML = `<p class="muted">Customer not found.</p>`;
-    return;
-  }
-
-  renderCustomerDetail(customer, sites, timeline, { offline: false });
-}
-
-function renderCustomerDetail(customer, sites, timeline, { offline }) {
-  currentCustomerObj = customer;
-  const typeLabel = customer.customerType === "contractor" ? "Contractor" : "End customer";
-  let html = `
-    <div class="info">
-      <div class="info-row"><span class="label">Name</span><strong>${customer.name}</strong></div>
-      <div class="info-row"><span class="label">Phone</span><strong>${customer.phone}</strong></div>
-      ${customer.email ? `<div class="info-row"><span class="label">Email</span>${customer.email}</div>` : ""}
-      <div class="info-row"><span class="label">Type</span>${typeLabel}</div>
-      ${customer.notes ? `<div class="info-row"><span class="label">Notes</span>${customer.notes}</div>` : ""}
-    </div>
-    <h4 style="margin:16px 0 8px;font-size:0.82rem;color:var(--muted);text-transform:uppercase;">Sites / Projects</h4>
-    <div class="sites-list">
-      ${sites.length ? sites.map((s) => `<span class="site-chip">${s.name}</span>`).join("") : `<span class="muted tiny">No sites yet</span>`}
-    </div>
-    <h4 style="margin:16px 0 8px;font-size:0.82rem;color:var(--muted);text-transform:uppercase;">Timeline</h4>
-    <div class="timeline-list">
-  `;
-
-  if (offline) {
-    html += `<p class="muted tiny">Showing cached profile. Sign in to load sites and full timeline.</p>`;
-  } else if (!timeline.length) {
-    html += `<p class="muted tiny">No activity yet.</p>`;
-  } else {
-    timeline.forEach((item) => {
-      const when = new Date(item.ts).toLocaleString();
-      const kind = (item.kind || "").replace(/_/g, " ");
-      html += `
-        <div class="timeline-item">
-          <div class="timeline-dot"></div>
-          <div>
-            <div class="kind">${kind}</div>
-            <div><strong>${item.title || "Activity"}</strong></div>
-            <div class="when">${when}${item.siteName ? ` · ${item.siteName}` : ""}</div>
-          </div>
-        </div>
-      `;
-    });
-  }
-
-  html += `</div>`;
-  customerDetailBody.innerHTML = html;
-  const titleEl = document.getElementById("customerDetailTitle");
-  if (titleEl) titleEl.textContent = customer.name;
-}
-
-function closeCustomerDetail() {
-  if (customerDetailModal) customerDetailModal.classList.add("hidden");
-  currentCustomerId = null;
-}
-
-function openNewCustomerModal(customer = null) {
-  if (!newCustomerModal) return;
-  editingCustomerId = customer?.id || null;
-  if (newCustomerTitle) newCustomerTitle.textContent = customer ? "Edit Customer" : "New Customer";
-  if (saveCustomerBtn) saveCustomerBtn.textContent = customer ? "Update Customer" : "Save Customer";
-
-  const nameEl = document.getElementById("newCustomerName");
-  const phoneEl = document.getElementById("newCustomerPhone");
-  const emailEl = document.getElementById("newCustomerEmail");
-  const typeEl = document.getElementById("newCustomerType");
-  const notesEl = document.getElementById("newCustomerNotes");
-  if (nameEl) nameEl.value = customer?.name || "";
-  if (phoneEl) phoneEl.value = customer?.phone || "";
-  if (emailEl) emailEl.value = customer?.email || "";
-  if (typeEl) typeEl.value = customer?.customerType || "end_customer";
-  if (notesEl) notesEl.value = customer?.notes || "";
-
-  newCustomerModal.classList.remove("hidden");
-}
-
-function closeNewCustomerModal() {
-  if (newCustomerModal) newCustomerModal.classList.add("hidden");
-  if (newCustomerForm) newCustomerForm.reset();
-  editingCustomerId = null;
-}
-
-async function handleNewCustomerSubmit(e) {
-  e.preventDefault();
-  const name = (document.getElementById("newCustomerName")?.value || "").trim();
-  const phone = (document.getElementById("newCustomerPhone")?.value || "").trim();
-  const email = (document.getElementById("newCustomerEmail")?.value || "").trim();
-  const customerType = document.getElementById("newCustomerType")?.value || "end_customer";
-  const notes = (document.getElementById("newCustomerNotes")?.value || "").trim();
-  if (!name || !phone) return;
-
-  const payload = { name, phone, email, notes, customerType };
-  const { error } = editingCustomerId
-    ? await apiRequest("PUT", `/api/customers/${editingCustomerId}`, payload)
-    : await apiRequest("POST", "/api/customers", payload);
-
-  if (error) {
-    showTransientToast(error);
-    return;
-  }
-
-  const wasEditing = editingCustomerId;
-  closeNewCustomerModal();
-  showTransientToast(`Customer ${name} ${wasEditing ? "updated" : "saved"}.`);
-  await fetchCustomers(); // refresh cache
-  if (wasEditing && currentCustomerId === wasEditing) {
-    openCustomerDetail(wasEditing);
-  } else {
-    renderCustomersList(customerSearchInput?.value || "");
-  }
-}
-
-function editCurrentCustomer() {
-  if (currentCustomerObj) openNewCustomerModal(currentCustomerObj);
-}
-
-async function deleteCurrentCustomer() {
-  if (!currentCustomerId) return;
-  const name = currentCustomerObj?.name || "this customer";
-  if (!confirm(`Delete ${name}? Their sites and timeline links will be removed. Captured leads are kept.`)) return;
-
-  const { error } = await apiRequest("DELETE", `/api/customers/${currentCustomerId}`);
-  if (error) {
-    showTransientToast(error);
-    return;
-  }
-  showTransientToast("Customer deleted.");
-  closeCustomerDetail();
-  await fetchCustomers();
-  openCustomersModal();
-}
-
-function openSiteModal() {
-  if (!siteModal || !currentCustomerId) return;
-  if (siteForm) siteForm.reset();
-  siteModal.classList.remove("hidden");
-  setTimeout(() => document.getElementById("siteName")?.focus(), 0);
-}
-
-function closeSiteModal() {
-  if (siteModal) siteModal.classList.add("hidden");
-}
-
-async function handleSiteSubmit(e) {
-  e.preventDefault();
-  if (!currentCustomerId) return;
-  const name = (document.getElementById("siteName")?.value || "").trim();
-  const address = (document.getElementById("siteAddress")?.value || "").trim();
-  const status = document.getElementById("siteStatus")?.value || "active";
-  const notes = (document.getElementById("siteNotes")?.value || "").trim();
-  if (!name) return;
-
-  const { error } = await apiRequest("POST", "/api/sites", {
-    customerId: currentCustomerId,
-    name,
-    address,
-    status,
-    notes,
-  });
-  if (error) {
-    showTransientToast(error);
-    return;
-  }
-  closeSiteModal();
-  showTransientToast("Site added.");
-  openCustomerDetail(currentCustomerId);
-}
-
-/* ===================== Phase 6: Quotes & Orders ===================== */
-
-const QUOTE_STATUS_LABELS = { draft: "Draft", sent: "Sent", accepted: "Accepted", rejected: "Rejected", converted: "Converted" };
-const ORDER_STATUS_LABELS = { pending: "Pending", confirmed: "Confirmed", fulfilled: "Fulfilled", cancelled: "Cancelled" };
-const QUOTE_ALL_STATUSES = ["draft", "sent", "accepted", "rejected", "converted"];
-const CLIENT_QUOTE_STATUSES = ["draft", "sent", "accepted", "rejected"];
-const ORDER_STATUSES = ["pending", "confirmed", "fulfilled", "cancelled"];
-
-function blankItem() {
-  return { description: "", brand: "", quantity: 1, unitPrice: 0, unit: "litre", shadeId: "" };
-}
-
-function openQuotesModal() {
-  if (!quotesModal) return;
-  const signedIn = !!getApiToken();
-  if (quotesSignInPrompt) quotesSignInPrompt.style.display = signedIn ? "none" : "block";
-  if (quotesPanel) quotesPanel.style.display = signedIn ? "block" : "none";
-  quotesModal.classList.remove("hidden");
-  if (signedIn) switchCommerceTab(commerceTab);
-}
-
-function closeQuotesModal() {
-  if (quotesModal) quotesModal.classList.add("hidden");
-}
-
-function switchCommerceTab(tab) {
-  commerceTab = tab;
-  if (quotesTabBtn) quotesTabBtn.classList.toggle("active", tab === "quotes");
-  if (ordersTabBtn) ordersTabBtn.classList.toggle("active", tab === "orders");
-  if (newQuoteBtn) newQuoteBtn.style.display = tab === "quotes" ? "" : "none";
-  buildStatusFilter();
-  renderDocList();
-}
-
-function buildStatusFilter() {
-  if (!docStatusFilter) return;
-  const statuses = commerceTab === "quotes" ? QUOTE_ALL_STATUSES : ORDER_STATUSES;
-  const labels = commerceTab === "quotes" ? QUOTE_STATUS_LABELS : ORDER_STATUS_LABELS;
-  docStatusFilter.innerHTML =
-    `<option value="">All statuses</option>` +
-    statuses.map((s) => `<option value="${s}">${labels[s]}</option>`).join("");
-}
-
-async function renderDocList() {
-  if (!docList) return;
-  docList.innerHTML = `<p class="muted tiny">Loading…</p>`;
-  const status = docStatusFilter?.value || "";
-  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-
-  if (commerceTab === "quotes") {
-    const { data, error } = await apiRequest("GET", `/api/quotes${qs}`);
-    if (error) { docList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
-    const quotes = data?.quotes || [];
-    if (!quotes.length) {
-      docList.innerHTML = `<p class="muted" style="padding:12px;">No quotes yet. Tap + New Quote.</p>`;
-      return;
-    }
-    docList.innerHTML = "";
-    quotes.forEach((q) => docList.appendChild(docCard({
-      number: q.quoteNumber,
-      sub: `${escHtml(q.customerName || "—")}${q.siteName ? " · " + escHtml(q.siteName) : ""} · ${q.itemCount || 0} items`,
-      total: q.total,
-      status: q.status,
-      labels: QUOTE_STATUS_LABELS,
-      onClick: () => openDocDetail("quote", q.id),
-    })));
-  } else {
-    const { data, error } = await apiRequest("GET", `/api/orders${qs}`);
-    if (error) { docList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
-    const orders = data?.orders || [];
-    if (!orders.length) {
-      docList.innerHTML = `<p class="muted" style="padding:12px;">No orders yet. Convert an accepted quote to create one.</p>`;
-      return;
-    }
-    docList.innerHTML = "";
-    orders.forEach((o) => docList.appendChild(docCard({
-      number: o.orderNumber,
-      sub: `${escHtml(o.customerName || "—")}${o.quoteNumber ? " · from " + escHtml(o.quoteNumber) : ""} · ${o.itemCount || 0} items`,
-      total: o.total,
-      status: o.status,
-      labels: ORDER_STATUS_LABELS,
-      onClick: () => openDocDetail("order", o.id),
-    })));
-  }
-}
-
-function docCard({ number, sub, total, status, labels, onClick }) {
-  const card = document.createElement("div");
-  card.className = "doc-card";
-  card.innerHTML = `
-    <div>
-      <div class="doc-number">${escHtml(number)}</div>
-      <div class="doc-sub">${sub}</div>
-    </div>
-    <div class="doc-right">
-      <div class="doc-total">${fmtMoney(total)}</div>
-      ${statusBadge(status, labels)}
-    </div>`;
-  card.addEventListener("click", onClick);
-  return card;
-}
-
-async function openQuoteForm(quote = null) {
-  if (!quoteFormModal) return;
-  editingQuoteId = quote?.id || null;
-  if (quoteFormTitle) quoteFormTitle.textContent = quote ? `Edit ${quote.quoteNumber}` : "New Quote";
-  if (saveQuoteBtn) saveQuoteBtn.textContent = quote ? "Update Quote" : "Save Quote";
-  if (quoteFormError) quoteFormError.textContent = "";
-
-  populateShadePicker();
-  await populateQuoteCustomers(quote?.customerId);
-  await populateQuoteSites(quote?.customerId, quote?.siteId);
-
-  if (quoteDiscount) quoteDiscount.value = quote?.discount ?? 0;
-  if (quoteTaxRate) quoteTaxRate.value = quote?.taxRate ?? 0;
-  if (quoteNotes) quoteNotes.value = quote?.notes || "";
-
-  quoteItemsList.innerHTML = "";
-  const items = quote?.items?.length ? quote.items : [blankItem()];
-  items.forEach(addQuoteItemRow);
-  recomputeQuoteTotals();
-  quoteFormModal.classList.remove("hidden");
-}
-
-function closeQuoteForm() {
-  if (quoteFormModal) quoteFormModal.classList.add("hidden");
-  editingQuoteId = null;
-}
-
-async function populateQuoteCustomers(selectedId) {
-  const customers = await fetchCustomers();
-  quoteCustomerSelect.innerHTML =
-    `<option value="">Select customer…</option>` +
-    customers.map((c) => `<option value="${c.id}">${escHtml(c.name)} — ${escHtml(c.phone)}</option>`).join("");
-  if (selectedId) quoteCustomerSelect.value = selectedId;
-}
-
-async function populateQuoteSites(customerId, selectedId) {
-  quoteSiteSelect.innerHTML = `<option value="">No site</option>`;
-  if (!customerId) return;
-  const { data } = await apiRequest("GET", `/api/sites?customerId=${encodeURIComponent(customerId)}`);
-  (data?.sites || []).forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.id;
-    opt.textContent = s.name;
-    quoteSiteSelect.appendChild(opt);
-  });
-  if (selectedId) quoteSiteSelect.value = selectedId;
-}
-
-function populateShadePicker() {
-  if (!quoteShadePicker) return;
-  const cat = Array.isArray(SHADE_CATALOG) ? SHADE_CATALOG : [];
-  quoteShadePicker.innerHTML =
-    `<option value="">Add a shade from the catalog…</option>` +
-    cat.map((s, i) =>
-      `<option value="${i}">${escHtml(s.name)}${s.brand ? " — " + escHtml(s.brand) : ""}${s.pricePerL ? ` (₹${s.pricePerL}/L)` : ""}</option>`
-    ).join("");
-}
-
-function onShadePicked() {
-  const idx = quoteShadePicker.value;
-  if (idx === "") return;
-  const s = SHADE_CATALOG[Number(idx)];
-  if (s) {
-    const litres = Math.ceil((ROOM_SQ_M * 2) / COVERAGE_SQ_M_PER_L);
-    addQuoteItemRow({
-      description: s.brand ? `${s.name} (${s.brand})` : s.name,
-      brand: s.brand || "",
-      quantity: litres,
-      unitPrice: s.pricePerL || 0,
-      unit: "litre",
-      shadeId: s.id || "",
-    });
-    recomputeQuoteTotals();
-  }
-  quoteShadePicker.value = "";
-}
-
-function addQuoteItemRow(item) {
-  const row = document.createElement("div");
-  row.className = "quote-item-row";
-  row.dataset.shadeId = item.shadeId || "";
-  const qty = item.quantity ?? 1;
-  const price = item.unitPrice ?? 0;
-  row.innerHTML = `
-    <div class="qi-desc-wrap">
-      <input class="qi-desc" type="text" placeholder="Description" value="${escHtml(item.description)}" />
-      <input class="qi-brand" type="text" placeholder="Brand (optional)" value="${escHtml(item.brand || "")}" />
-    </div>
-    <input class="qi-qty" type="number" min="0" step="0.01" value="${qty}" />
-    <input class="qi-price" type="number" min="0" step="0.01" value="${price}" />
-    <div class="qi-line">${fmtMoney((Number(qty) || 0) * (Number(price) || 0))}</div>
-    <button type="button" class="qi-remove" title="Remove line">×</button>`;
-  row.querySelector(".qi-remove").addEventListener("click", () => {
-    row.remove();
-    ensureAtLeastOneRow();
-    recomputeQuoteTotals();
-  });
-  row.querySelectorAll("input").forEach((inp) => inp.addEventListener("input", recomputeQuoteTotals));
-  quoteItemsList.appendChild(row);
-}
-
-function ensureAtLeastOneRow() {
-  if (quoteItemsList && quoteItemsList.querySelectorAll(".quote-item-row").length === 0) {
-    addQuoteItemRow(blankItem());
-  }
-}
-
-function recomputeQuoteTotals() {
-  if (!quoteItemsList || !quoteTotals) return;
-  let subtotal = 0;
-  quoteItemsList.querySelectorAll(".quote-item-row").forEach((row) => {
-    const qty = Number(row.querySelector(".qi-qty").value) || 0;
-    const price = Number(row.querySelector(".qi-price").value) || 0;
-    const line = round2(qty * price);
-    row.querySelector(".qi-line").textContent = fmtMoney(line);
-    subtotal += line;
-  });
-  subtotal = round2(subtotal);
-  const discount = Number(quoteDiscount?.value) || 0;
-  const taxRate = Number(quoteTaxRate?.value) || 0;
-  const base = Math.max(0, round2(subtotal - discount));
-  const tax = round2((base * taxRate) / 100);
-  const total = round2(base + tax);
-  quoteTotals.innerHTML = `
-    <div class="t-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
-    <div class="t-row"><span>Discount</span><span>− ${fmtMoney(discount)}</span></div>
-    <div class="t-row"><span>Tax (${taxRate}%)</span><span>${fmtMoney(tax)}</span></div>
-    <div class="t-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>`;
-}
-
-function collectQuoteItems() {
-  return [...quoteItemsList.querySelectorAll(".quote-item-row")]
-    .map((row, i) => ({
-      shadeId: row.dataset.shadeId || "",
-      description: row.querySelector(".qi-desc").value.trim(),
-      brand: row.querySelector(".qi-brand").value.trim(),
-      quantity: Number(row.querySelector(".qi-qty").value) || 0,
-      unitPrice: Number(row.querySelector(".qi-price").value) || 0,
-      unit: "litre",
-      sortOrder: i,
-    }))
-    .filter((it) => it.description);
-}
-
-async function handleQuoteSubmit(e) {
-  e.preventDefault();
-  const customerId = quoteCustomerSelect.value;
-  if (!customerId) { quoteFormError.textContent = "Select a customer."; return; }
-  const items = collectQuoteItems();
-  if (!items.length) { quoteFormError.textContent = "Add at least one line item with a description."; return; }
-
-  const payload = {
-    customerId,
-    siteId: quoteSiteSelect.value || null,
-    discount: Number(quoteDiscount.value) || 0,
-    taxRate: Number(quoteTaxRate.value) || 0,
-    notes: quoteNotes.value.trim(),
-    items,
-  };
-
-  if (saveQuoteBtn) saveQuoteBtn.disabled = true;
-  const { error } = editingQuoteId
-    ? await apiRequest("PUT", `/api/quotes/${editingQuoteId}`, payload)
-    : await apiRequest("POST", "/api/quotes", payload);
-  if (saveQuoteBtn) saveQuoteBtn.disabled = false;
-
-  if (error) { quoteFormError.textContent = error; return; }
-  const wasEditing = editingQuoteId;
-  closeQuoteForm();
-  showTransientToast(wasEditing ? "Quote updated." : "Quote created.");
-  commerceTab = "quotes";
-  if (docStatusFilter) docStatusFilter.value = "";
-  buildStatusFilter();
-  renderDocList();
-}
-
-async function openDocDetail(type, id) {
-  if (!docDetailModal || !docDetailBody) return;
-  docDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
-  if (docDetailActions) docDetailActions.innerHTML = "";
-  docDetailModal.classList.remove("hidden");
-
-  const path = type === "quote" ? `/api/quotes/${id}` : `/api/orders/${id}`;
-  const { data, error } = await apiRequest("GET", path);
-  const doc = type === "quote" ? data?.quote : data?.order;
-  if (error || !doc) {
-    docDetailBody.innerHTML = `<p class="muted">${escHtml(error || "Not found.")}</p>`;
-    return;
-  }
-  currentDoc = { type, data: doc };
-  renderDocDetail(type, doc);
-}
-
-function closeDocDetail() {
-  if (docDetailModal) docDetailModal.classList.add("hidden");
-  currentDoc = null;
-}
-
-function renderDocDetail(type, doc) {
-  const isQuote = type === "quote";
-  const number = isQuote ? doc.quoteNumber : doc.orderNumber;
-  const labels = isQuote ? QUOTE_STATUS_LABELS : ORDER_STATUS_LABELS;
-  if (docDetailTitle) docDetailTitle.textContent = number;
-
-  const itemRows = (doc.items || []).map((it) => `
-    <tr>
-      <td>${escHtml(it.description)}${it.brand ? `<div class="muted tiny">${escHtml(it.brand)}</div>` : ""}</td>
-      <td>${it.quantity}</td>
-      <td>${fmtMoney(it.unitPrice)}</td>
-      <td>${fmtMoney(it.lineTotal)}</td>
-    </tr>`).join("");
-
-  docDetailBody.innerHTML = `
-    <div class="info">
-      <div class="info-row"><span class="label">Status</span>${statusBadge(doc.status, labels)}</div>
-      <div class="info-row"><span class="label">Customer</span><strong>${escHtml(doc.customerName || "—")}</strong></div>
-      ${doc.siteName ? `<div class="info-row"><span class="label">Site</span>${escHtml(doc.siteName)}</div>` : ""}
-      ${!isQuote && doc.quoteNumber ? `<div class="info-row"><span class="label">From quote</span>${escHtml(doc.quoteNumber)}</div>` : ""}
-      ${doc.notes ? `<div class="info-row"><span class="label">Notes</span>${escHtml(doc.notes)}</div>` : ""}
-    </div>
-    <table class="doc-detail-items">
-      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Total</th></tr></thead>
-      <tbody>${itemRows}</tbody>
-    </table>
-    <div class="quote-totals">
-      <div class="t-row"><span>Subtotal</span><span>${fmtMoney(doc.subtotal)}</span></div>
-      <div class="t-row"><span>Discount</span><span>− ${fmtMoney(doc.discount)}</span></div>
-      <div class="t-row"><span>Tax (${doc.taxRate}%)</span><span>${fmtMoney(doc.taxAmount)}</span></div>
-      <div class="t-row grand"><span>Total</span><span>${fmtMoney(doc.total)}</span></div>
-    </div>`;
-
-  renderDocActions(type, doc);
-}
-
-function actionBtn(label, cls, onClick) {
-  const b = document.createElement("button");
-  b.className = cls;
-  b.textContent = label;
-  b.addEventListener("click", onClick);
-  return b;
-}
-
-function renderDocActions(type, doc) {
-  if (!docDetailActions) return;
-  docDetailActions.innerHTML = "";
-
-  if (type === "quote" && doc.status !== "converted") {
-    const sel = document.createElement("select");
-    sel.className = "doc-status-select";
-    sel.innerHTML = CLIENT_QUOTE_STATUSES
-      .map((s) => `<option value="${s}" ${s === doc.status ? "selected" : ""}>${QUOTE_STATUS_LABELS[s]}</option>`)
-      .join("");
-    sel.addEventListener("change", () => updateDocStatus("quote", doc.id, sel.value));
-    docDetailActions.appendChild(sel);
-    docDetailActions.appendChild(actionBtn("Delete", "button ghost danger", () => deleteDoc("quote", doc.id)));
-    docDetailActions.appendChild(actionBtn("Edit", "button ghost", () => editQuote(doc)));
-    docDetailActions.appendChild(actionBtn("Convert to Order", "button primary", () => convertQuote(doc.id)));
-    return;
-  }
-
-  if (type === "quote") {
-    const note = document.createElement("span");
-    note.className = "muted tiny";
-    note.style.marginRight = "auto";
-    note.textContent = "Converted to an order.";
-    docDetailActions.appendChild(note);
-    docDetailActions.appendChild(actionBtn("Delete", "button ghost danger", () => deleteDoc("quote", doc.id)));
-    docDetailActions.appendChild(actionBtn("Done", "button primary", closeDocDetail));
-    return;
-  }
-
-  // order
-  const sel = document.createElement("select");
-  sel.className = "doc-status-select";
-  sel.innerHTML = ORDER_STATUSES
-    .map((s) => `<option value="${s}" ${s === doc.status ? "selected" : ""}>${ORDER_STATUS_LABELS[s]}</option>`)
-    .join("");
-  sel.addEventListener("change", () => updateDocStatus("order", doc.id, sel.value));
-  docDetailActions.appendChild(sel);
-  docDetailActions.appendChild(actionBtn("Delete", "button ghost danger", () => deleteDoc("order", doc.id)));
-  docDetailActions.appendChild(actionBtn("Done", "button primary", closeDocDetail));
-}
-
-async function updateDocStatus(type, id, status) {
-  const path = type === "quote" ? `/api/quotes/${id}/status` : `/api/orders/${id}/status`;
-  const { error } = await apiRequest("PATCH", path, { status });
-  if (error) { showTransientToast(error); return; }
-  showTransientToast(`${type === "quote" ? "Quote" : "Order"} status updated.`);
-  openDocDetail(type, id);
-}
-
-async function convertQuote(id) {
-  if (!confirm("Convert this quote to an order? The quote will be locked from further edits.")) return;
-  const { data, error } = await apiRequest("POST", `/api/quotes/${id}/convert`);
-  if (error) { showTransientToast(error); return; }
-  showTransientToast(`Order ${data.order.orderNumber} created.`);
-  closeDocDetail();
-  commerceTab = "orders";
-  if (docStatusFilter) docStatusFilter.value = "";
-  openQuotesModal();
-}
-
-async function deleteDoc(type, id) {
-  const label = type === "quote" ? "quote" : "order";
-  if (!confirm(`Delete this ${label}? This cannot be undone.`)) return;
-  const path = type === "quote" ? `/api/quotes/${id}` : `/api/orders/${id}`;
-  const { error } = await apiRequest("DELETE", path);
-  if (error) { showTransientToast(error); return; }
-  showTransientToast(`${label[0].toUpperCase()}${label.slice(1)} deleted.`);
-  closeDocDetail();
-  renderDocList();
-}
-
-function editQuote(doc) {
-  closeDocDetail();
-  openQuoteForm(doc);
-}
-
-/* ===================== Phase 6: Inventory ===================== */
-
-const INV_STATUS_LABELS = { in_stock: "In stock", low_stock: "Low stock", out_of_stock: "Out of stock" };
-
-function openInventoryModal() {
-  if (!inventoryModal) return;
-  const signedIn = !!getApiToken();
-  if (inventorySignInPrompt) inventorySignInPrompt.style.display = signedIn ? "none" : "block";
-  if (inventoryPanel) inventoryPanel.style.display = signedIn ? "block" : "none";
-  inventoryModal.classList.remove("hidden");
-  if (signedIn) {
-    renderInventorySummary();
-    renderInventoryList();
-  }
-}
-
-function closeInventoryModal() {
-  if (inventoryModal) inventoryModal.classList.add("hidden");
-}
-
-async function renderInventorySummary() {
-  if (!inventorySummary) return;
-  const { data, error } = await apiRequest("GET", "/api/inventory/summary");
-  if (error || !data?.summary) { inventorySummary.innerHTML = ""; return; }
-  const s = data.summary;
-  inventorySummary.innerHTML = `
-    <div class="inv-chip"><div class="n">${s.total}</div><div class="l">Items</div></div>
-    <div class="inv-chip low"><div class="n">${s.lowStock}</div><div class="l">Low</div></div>
-    <div class="inv-chip out"><div class="n">${s.outOfStock}</div><div class="l">Out</div></div>
-    <div class="inv-chip"><div class="n">${fmtMoney(s.stockValue)}</div><div class="l">Stock value</div></div>`;
-}
-
-async function renderInventoryList() {
-  if (!inventoryList) return;
-  inventoryList.innerHTML = `<p class="muted tiny">Loading…</p>`;
-  const q = (inventorySearchInput?.value || "").trim();
-  const status = inventoryStatusFilter?.value || "";
-  const params = [];
-  if (q) params.push(`q=${encodeURIComponent(q)}`);
-  if (status) params.push(`status=${encodeURIComponent(status)}`);
-  const qs = params.length ? `?${params.join("&")}` : "";
-
-  const { data, error } = await apiRequest("GET", `/api/inventory${qs}`);
-  if (error) { inventoryList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`; return; }
-  const items = data?.items || [];
-  if (!items.length) {
-    inventoryList.innerHTML = `<p class="muted" style="padding:12px;">No items${q || status ? " match this filter" : " yet. Tap + New Item"}.</p>`;
-    return;
-  }
-  inventoryList.innerHTML = "";
-  items.forEach((it) => inventoryList.appendChild(invCard(it)));
-}
-
-function invCard(it) {
-  const card = document.createElement("div");
-  card.className = "inv-card" + (it.status === "low_stock" ? " low" : it.status === "out_of_stock" ? " out" : "");
-  card.innerHTML = `
-    <div>
-      <div class="name">${escHtml(it.name)}</div>
-      <div class="meta">${it.brand ? escHtml(it.brand) + " · " : ""}${it.sku ? escHtml(it.sku) + " · " : ""}${statusBadge(it.status, INV_STATUS_LABELS)}</div>
-    </div>
-    <div class="qty">${it.quantity} <small>${escHtml(it.unit)}</small></div>`;
-  card.addEventListener("click", () => openInventoryDetail(it.id));
-  return card;
-}
-
-function populateInvShadePicker(selectedShadeId) {
-  if (!invShadePicker) return;
-  const cat = Array.isArray(SHADE_CATALOG) ? SHADE_CATALOG : [];
-  invShadePicker.innerHTML =
-    `<option value="">No linked shade</option>` +
-    cat.map((s) =>
-      `<option value="${escHtml(s.id || "")}" data-price="${s.pricePerL || 0}" data-brand="${escHtml(s.brand || "")}" data-name="${escHtml(s.name || "")}">${escHtml(s.name)}${s.brand ? " — " + escHtml(s.brand) : ""}</option>`
-    ).join("");
-  if (selectedShadeId) invShadePicker.value = selectedShadeId;
-}
-
-function openInventoryForm(item = null) {
-  if (!inventoryFormModal) return;
-  editingInventoryId = item?.id || null;
-  if (inventoryFormTitle) inventoryFormTitle.textContent = item ? "Edit Item" : "New Item";
-  if (saveInventoryBtn) saveInventoryBtn.textContent = item ? "Update Item" : "Save Item";
-  if (inventoryFormError) inventoryFormError.textContent = "";
-
-  populateInvShadePicker(item?.shadeId);
-  setVal("invName", item?.name || "");
-  setVal("invBrand", item?.brand || "");
-  setVal("invSku", item?.sku || "");
-  setVal("invUnit", item?.unit || "litre");
-  setVal("invQuantity", item?.quantity ?? 0);
-  setVal("invReorder", item?.reorderLevel ?? 0);
-  setVal("invUnitPrice", item?.unitPrice ?? 0);
-  setVal("invCostPrice", item?.costPrice ?? 0);
-  setVal("invNotes", item?.notes || "");
-
-  // Opening quantity is only editable on create; existing stock moves via adjust.
-  if (invQtyField) invQtyField.style.display = item ? "none" : "";
-
-  inventoryFormModal.classList.remove("hidden");
-}
-
-function setVal(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.value = value;
-}
-
-function closeInventoryForm() {
-  if (inventoryFormModal) inventoryFormModal.classList.add("hidden");
-  if (inventoryForm) inventoryForm.reset();
-  editingInventoryId = null;
-}
-
-async function handleInventorySubmit(e) {
-  e.preventDefault();
-  const name = (document.getElementById("invName")?.value || "").trim();
-  if (!name) { inventoryFormError.textContent = "Product name is required."; return; }
-
-  const payload = {
-    name,
-    brand: (document.getElementById("invBrand")?.value || "").trim(),
-    sku: (document.getElementById("invSku")?.value || "").trim(),
-    unit: (document.getElementById("invUnit")?.value || "litre").trim(),
-    reorderLevel: Number(document.getElementById("invReorder")?.value) || 0,
-    unitPrice: Number(document.getElementById("invUnitPrice")?.value) || 0,
-    costPrice: Number(document.getElementById("invCostPrice")?.value) || 0,
-    shadeId: invShadePicker?.value || "",
-    notes: (document.getElementById("invNotes")?.value || "").trim(),
-  };
-  if (!editingInventoryId) {
-    payload.quantity = Number(document.getElementById("invQuantity")?.value) || 0;
-  }
-
-  if (saveInventoryBtn) saveInventoryBtn.disabled = true;
-  const { error } = editingInventoryId
-    ? await apiRequest("PUT", `/api/inventory/${editingInventoryId}`, payload)
-    : await apiRequest("POST", "/api/inventory", payload);
-  if (saveInventoryBtn) saveInventoryBtn.disabled = false;
-
-  if (error) { inventoryFormError.textContent = error; return; }
-  const wasEditing = editingInventoryId;
-  closeInventoryForm();
-  showTransientToast(wasEditing ? "Item updated." : "Item added.");
-  renderInventorySummary();
-  if (wasEditing && currentInventoryId === wasEditing) {
-    openInventoryDetail(wasEditing);
-  } else {
-    renderInventoryList();
-  }
-}
-
-async function openInventoryDetail(id) {
-  if (!inventoryDetailModal || !inventoryDetailBody) return;
-  currentInventoryId = id;
-  inventoryDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
-  inventoryDetailModal.classList.remove("hidden");
-
-  const { data, error } = await apiRequest("GET", `/api/inventory/${id}`);
-  const item = data?.item;
-  if (error || !item) {
-    inventoryDetailBody.innerHTML = `<p class="muted">${escHtml(error || "Not found.")}</p>`;
-    return;
-  }
-  currentInventoryObj = item;
-  renderInventoryDetail(item);
-}
-
-function renderInventoryDetail(item) {
-  if (inventoryDetailTitle) inventoryDetailTitle.textContent = item.name;
-  const movements = item.movements || [];
-  const movementRows = movements.length
-    ? movements.map((m) => `
-        <tr>
-          <td>${new Date(m.createdAt).toLocaleString()}${m.reason ? `<div class="muted tiny">${escHtml(m.reason)}</div>` : ""}</td>
-          <td class="${m.delta >= 0 ? "pos" : "neg"}">${m.delta >= 0 ? "+" : ""}${m.delta}</td>
-          <td>${m.balanceAfter}</td>
-        </tr>`).join("")
-    : `<tr><td colspan="3" class="muted tiny">No movements yet.</td></tr>`;
-
-  inventoryDetailBody.innerHTML = `
-    <div class="info">
-      <div class="info-row"><span class="label">Status</span>${statusBadge(item.status, INV_STATUS_LABELS)}</div>
-      <div class="info-row"><span class="label">On hand</span><strong>${item.quantity} ${escHtml(item.unit)}</strong></div>
-      <div class="info-row"><span class="label">Reorder level</span>${item.reorderLevel} ${escHtml(item.unit)}</div>
-      ${item.brand ? `<div class="info-row"><span class="label">Brand</span>${escHtml(item.brand)}</div>` : ""}
-      ${item.sku ? `<div class="info-row"><span class="label">SKU</span>${escHtml(item.sku)}</div>` : ""}
-      <div class="info-row"><span class="label">Selling</span>${fmtMoney(item.unitPrice)}</div>
-      <div class="info-row"><span class="label">Cost</span>${fmtMoney(item.costPrice)}</div>
-      ${item.notes ? `<div class="info-row"><span class="label">Notes</span>${escHtml(item.notes)}</div>` : ""}
-    </div>
-    <div class="inv-adjust">
-      <h4>Adjust stock</h4>
-      <div class="inv-adjust-row">
-        <button type="button" class="button tiny ghost" id="invReceiveBtn">Receive</button>
-        <button type="button" class="button tiny ghost" id="invIssueBtn">Issue</button>
-        <input class="inv-delta" id="invDeltaInput" type="number" step="0.01" placeholder="± qty" />
-        <input class="inv-reason" id="invReasonInput" type="text" placeholder="Reason (optional)" />
-        <button type="button" class="button tiny primary" id="invApplyBtn">Apply</button>
-      </div>
-    </div>
-    <h4 class="section-label">Recent movements</h4>
-    <table class="inv-movements">
-      <thead><tr><th>When</th><th>Change</th><th>Balance</th></tr></thead>
-      <tbody>${movementRows}</tbody>
-    </table>`;
-
-  const deltaInput = document.getElementById("invDeltaInput");
-  document.getElementById("invReceiveBtn")?.addEventListener("click", () => {
-    const v = Math.abs(Number(deltaInput.value) || 0);
-    deltaInput.value = v || "";
-    deltaInput.focus();
-  });
-  document.getElementById("invIssueBtn")?.addEventListener("click", () => {
-    const v = Math.abs(Number(deltaInput.value) || 0);
-    deltaInput.value = v ? -v : "";
-    deltaInput.focus();
-  });
-  document.getElementById("invApplyBtn")?.addEventListener("click", () => applyInventoryAdjust(item.id));
-}
-
-async function applyInventoryAdjust(id) {
-  const delta = Number(document.getElementById("invDeltaInput")?.value);
-  const reason = (document.getElementById("invReasonInput")?.value || "").trim();
-  if (!delta) { showTransientToast("Enter a non-zero quantity change."); return; }
-  const { error } = await apiRequest("POST", `/api/inventory/${id}/adjust`, { delta, reason });
-  if (error) { showTransientToast(error); return; }
-  showTransientToast("Stock updated.");
-  renderInventorySummary();
-  openInventoryDetail(id);
-}
-
-function closeInventoryDetail() {
-  if (inventoryDetailModal) inventoryDetailModal.classList.add("hidden");
-  currentInventoryId = null;
-  currentInventoryObj = null;
-}
-
-function editCurrentInventory() {
-  if (currentInventoryObj) {
-    closeInventoryDetail();
-    openInventoryForm(currentInventoryObj);
-  }
-}
-
-async function deleteCurrentInventory() {
-  if (!currentInventoryId) return;
-  const name = currentInventoryObj?.name || "this item";
-  if (!confirm(`Delete ${name}? Its stock history will be removed.`)) return;
-  const { error } = await apiRequest("DELETE", `/api/inventory/${currentInventoryId}`);
-  if (error) { showTransientToast(error); return; }
-  showTransientToast("Item deleted.");
-  closeInventoryDetail();
-  renderInventorySummary();
-  renderInventoryList();
-}
-
-/* ===================== Phase 6: Credit Ledger & Reminders ===================== */
-
-const LEDGER_SOURCE_LABELS = {
-  order: "Order",
-  payment: "Payment",
-  manual: "Manual",
-  adjustment: "Adjustment",
-  reversal: "Reversal",
-};
-const REMINDER_CHANNEL_LABELS = {
-  manual: "Logged",
-  call: "Call",
-  sms: "SMS",
-  whatsapp: "WhatsApp",
-  email: "Email",
-};
-
-function openLedgerModal() {
-  if (!ledgerModal) return;
-  const signedIn = !!getApiToken();
-  if (ledgerSignInPrompt) ledgerSignInPrompt.style.display = signedIn ? "none" : "block";
-  if (ledgerPanel) ledgerPanel.style.display = signedIn ? "block" : "none";
-  ledgerModal.classList.remove("hidden");
-  if (signedIn) {
-    renderLedgerSummary();
-    renderLedgerList();
-  }
-}
-
-function closeLedgerModal() {
-  if (ledgerModal) ledgerModal.classList.add("hidden");
-}
-
-async function renderLedgerSummary() {
-  if (!ledgerSummary) return;
-  const { data, error } = await apiRequest("GET", "/api/ledger/summary");
-  if (error || !data?.summary) { ledgerSummary.innerHTML = ""; return; }
-  const s = data.summary;
-  ledgerSummary.innerHTML = `
-    <div class="inv-chip"><div class="n">${fmtMoney(s.receivable)}</div><div class="l">Receivable</div></div>
-    <div class="inv-chip out"><div class="n">${fmtMoney(s.overdueAmount)}</div><div class="l">Overdue</div></div>
-    <div class="inv-chip"><div class="n">${s.debtors}</div><div class="l">Owe you</div></div>
-    <div class="inv-chip low"><div class="n">${s.overdueCustomers}</div><div class="l">Overdue</div></div>`;
-}
-
-const ledgerPaginator = createPaginator();
-
-function ledgerListQuery() {
-  const q = (ledgerSearchInput?.value || "").trim();
-  const overdue = ledgerFilter?.value === "overdue";
-  const params = [];
-  if (q) params.push(`q=${encodeURIComponent(q)}`);
-  if (overdue) params.push("overdue=true");
-  let path = "/api/ledger/customers";
-  if (params.length) path += `?${params.join("&")}`;
-  return path;
-}
-
-// Renders the first page (resets paging). Safe to pass as an event listener.
-async function renderLedgerList() {
-  if (!ledgerList) return;
-  ledgerPaginator.reset();
-  ledgerList.innerHTML = `<p class="muted tiny">Loading…</p>`;
-  await fetchLedgerPage(false);
-}
-
-async function loadMoreLedger() {
-  await fetchLedgerPage(true);
-}
-
-async function fetchLedgerPage(append) {
-  if (!ledgerList) return;
-  const path = withPageParams(ledgerListQuery(), ledgerPaginator.params());
-  const { data, error } = await apiRequest("GET", path);
-  const oldBtn = ledgerList.querySelector(".load-more-row");
-  if (oldBtn) oldBtn.remove();
-  if (error) {
-    if (!append) ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${escHtml(error)}</p>`;
-    return;
-  }
-  const customers = data?.customers || [];
-  ledgerPaginator.absorb(data?.pagination);
-  if (!append) ledgerList.innerHTML = "";
-  if (!customers.length && !append) {
-    const q = (ledgerSearchInput?.value || "").trim();
-    const overdue = ledgerFilter?.value === "overdue";
-    ledgerList.innerHTML = `<p class="muted" style="padding:12px;">${
-      overdue || q ? "No accounts match this filter." : "No outstanding balances. Order totals post here automatically."
-    }</p>`;
-    return;
-  }
-  customers.forEach((c) => ledgerList.appendChild(ledgerCard(c)));
-  if (ledgerPaginator.hasMore) ledgerList.appendChild(ledgerLoadMoreRow());
-}
-
-function ledgerLoadMoreRow() {
-  const row = document.createElement("div");
-  row.className = "load-more-row";
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "button ghost";
-  const remaining = Math.max(0, ledgerPaginator.total - ledgerPaginator.offset);
-  btn.textContent = remaining > 0 ? `Load more (${remaining} more)` : "Load more";
-  btn.addEventListener("click", () => {
-    btn.disabled = true;
-    btn.textContent = "Loading…";
-    loadMoreLedger();
-  });
-  row.appendChild(btn);
-  return row;
-}
-
-function ledgerCard(c) {
-  const card = document.createElement("div");
-  card.className = "inv-card" + (c.overdue ? " out" : "");
-  const overdueTag = c.overdue
-    ? `<span class="status-badge out_of_stock">Overdue ${overdueDaysLabel(c.oldestOverdueDate)}</span>`
-    : "";
-  const reminded = c.lastReminderAt
-    ? ` · reminded ${new Date(c.lastReminderAt).toLocaleDateString()}`
-    : "";
-  card.innerHTML = `
-    <div>
-      <div class="name">${escHtml(c.customerName)}</div>
-      <div class="meta">${escHtml(c.phone || "")}${reminded} ${overdueTag}</div>
-    </div>
-    <div class="qty">${fmtMoney(c.balance)}<small>owes</small></div>`;
-  card.addEventListener("click", () => openLedgerDetail(c.customerId));
-  return card;
-}
-
-async function openLedgerDetail(customerId) {
-  if (!ledgerDetailModal || !ledgerDetailBody) return;
-  currentLedgerCustomerId = customerId;
-  ledgerDetailBody.innerHTML = `<p class="muted tiny">Loading…</p>`;
-  ledgerDetailModal.classList.remove("hidden");
-
-  const { data, error } = await apiRequest("GET", `/api/ledger/customers/${customerId}`);
-  const ledger = data?.ledger;
-  if (error || !ledger) {
-    ledgerDetailBody.innerHTML = `<p class="muted">${escHtml(error || "Not found.")}</p>`;
-    return;
-  }
-  renderLedgerDetail(ledger);
-}
-
-function renderLedgerDetail(ledger) {
-  if (ledgerDetailTitle) ledgerDetailTitle.textContent = ledger.customerName;
-
-  const entries = ledger.entries || [];
-  const entryRows = entries.length
-    ? entries.map((e) => {
-        const signed = e.entryType === "debit" ? `+${fmtMoney(e.amount)}` : `− ${fmtMoney(e.amount)}`;
-        const label = LEDGER_SOURCE_LABELS[e.source] || e.source;
-        const due = e.dueDate ? ` · due ${new Date(e.dueDate).toLocaleDateString()}` : "";
-        const detail = e.note || e.referenceLabel || label;
-        return `
-        <tr>
-          <td>${new Date(e.createdAt).toLocaleDateString()}<div class="muted tiny">${escHtml(detail)}${due}</div></td>
-          <td class="${e.entryType === "debit" ? "neg" : "pos"}">${signed}</td>
-          <td>${fmtMoney(e.balanceAfter)}</td>
-        </tr>`;
-      }).join("")
-    : `<tr><td colspan="3" class="muted tiny">No ledger activity yet.</td></tr>`;
-
-  const reminders = ledger.reminders || [];
-  const reminderRows = reminders.length
-    ? reminders.map((r) => `
-        <li>
-          <span class="status-badge sent">${REMINDER_CHANNEL_LABELS[r.channel] || r.channel}</span>
-          <span class="muted tiny">${new Date(r.createdAt).toLocaleString()} · balance ${fmtMoney(r.balanceAtReminder)}</span>
-          ${r.note ? `<div class="tiny">${escHtml(r.note)}</div>` : ""}
-        </li>`).join("")
-    : `<li class="muted tiny">No reminders logged yet.</li>`;
-
-  ledgerDetailBody.innerHTML = `
-    <div class="info">
-      <div class="info-row"><span class="label">Balance</span><span>${balanceSummaryLine(ledger.balance)}</span></div>
-      ${ledger.overdue ? `<div class="info-row"><span class="label">Status</span><span class="status-badge out_of_stock">Overdue ${overdueDaysLabel(ledger.oldestOverdueDate)}</span></div>` : ""}
-      ${ledger.phone ? `<div class="info-row"><span class="label">Phone</span>${escHtml(ledger.phone)}</div>` : ""}
-    </div>
-
-    <div class="inv-adjust">
-      <h4>Record a transaction</h4>
-      <div class="ledger-entry-row">
-        <input class="inv-delta" id="ledgerAmountInput" type="number" min="0" step="0.01" placeholder="Amount ₹" />
-        <input class="inv-reason" id="ledgerNoteInput" type="text" placeholder="Note (optional)" />
-        <input class="ledger-due" id="ledgerDueInput" type="date" title="Due date (charges)" />
-      </div>
-      <div class="ledger-entry-actions">
-        <button type="button" class="button tiny primary" id="ledgerPaymentBtn">Record payment</button>
-        <button type="button" class="button tiny ghost" id="ledgerChargeBtn">Add charge</button>
-      </div>
-    </div>
-
-    <div class="inv-adjust">
-      <h4>Log a reminder</h4>
-      <div class="ledger-entry-row">
-        <select class="crm-search" id="ledgerChannelSelect" style="flex:0 0 auto;">
-          <option value="whatsapp">WhatsApp</option>
-          <option value="call">Call</option>
-          <option value="sms">SMS</option>
-          <option value="email">Email</option>
-          <option value="manual">Other</option>
-        </select>
-        <input class="inv-reason" id="ledgerReminderNote" type="text" placeholder="Reminder note (optional)" />
-        <button type="button" class="button tiny ghost" id="ledgerReminderBtn">Log reminder</button>
-      </div>
-    </div>
-
-    <h4 class="section-label">Statement</h4>
-    <table class="inv-movements">
-      <thead><tr><th>When</th><th>Amount</th><th>Balance</th></tr></thead>
-      <tbody>${entryRows}</tbody>
-    </table>
-
-    <h4 class="section-label">Reminders</h4>
-    <ul class="ledger-reminders">${reminderRows}</ul>`;
-
-  document.getElementById("ledgerPaymentBtn")?.addEventListener("click", () => addLedgerEntry(ledger.customerId, "credit"));
-  document.getElementById("ledgerChargeBtn")?.addEventListener("click", () => addLedgerEntry(ledger.customerId, "debit"));
-  document.getElementById("ledgerReminderBtn")?.addEventListener("click", () => logLedgerReminder(ledger.customerId));
-}
-
-async function addLedgerEntry(customerId, entryType) {
-  const amount = Number(document.getElementById("ledgerAmountInput")?.value);
-  const note = (document.getElementById("ledgerNoteInput")?.value || "").trim();
-  const dueDate = document.getElementById("ledgerDueInput")?.value || null;
-  if (!amount || amount <= 0) { showTransientToast("Enter an amount greater than zero."); return; }
-
-  const body = { entryType, amount, note, source: entryType === "credit" ? "payment" : "manual" };
-  if (entryType === "debit" && dueDate) body.dueDate = dueDate;
-
-  const { error } = await apiRequest("POST", `/api/ledger/customers/${customerId}/entries`, body);
-  if (error) { showTransientToast(error); return; }
-  showTransientToast(entryType === "credit" ? "Payment recorded." : "Charge added.");
-  renderLedgerSummary();
-  openLedgerDetail(customerId);
-}
-
-async function logLedgerReminder(customerId) {
-  const channel = document.getElementById("ledgerChannelSelect")?.value || "manual";
-  const note = (document.getElementById("ledgerReminderNote")?.value || "").trim();
-  const { error } = await apiRequest("POST", `/api/ledger/customers/${customerId}/reminders`, { channel, note });
-  if (error) { showTransientToast(error); return; }
-  showTransientToast("Reminder logged.");
-  openLedgerDetail(customerId);
-}
-
-function closeLedgerDetail() {
-  if (ledgerDetailModal) ledgerDetailModal.classList.add("hidden");
-  currentLedgerCustomerId = null;
-  // Refresh the list so updated balances / reminder dates show immediately.
-  if (ledgerModal && !ledgerModal.classList.contains("hidden")) renderLedgerList();
-}
+customersView = createCustomersView({
+  els: {
+    customersBtn,
+    customersModal,
+    customersListEl,
+    customersSignInPrompt,
+    customersPanel,
+    customerSearchInput,
+    newCustomerBtn,
+    closeCustomersBtn,
+    closeCustomers2Btn,
+    customerDetailModal,
+    customerDetailBody,
+    closeCustomerDetailBtn,
+    closeCustomerDetail2Btn,
+    addSiteBtn,
+    newCustomerModal,
+    newCustomerForm,
+    closeNewCustomerBtn,
+    cancelNewCustomerBtn,
+    deleteCustomerBtn,
+    editCustomerBtn,
+    newCustomerTitle,
+    saveCustomerBtn,
+    siteModal,
+    siteForm,
+    closeSiteBtn,
+    cancelSiteBtn,
+    leadCustomerField,
+    leadSiteField,
+    leadCustomerSelect,
+    leadSiteSelect,
+  },
+  apiRequest,
+  getApiToken,
+  safeLsSet,
+  closeLeadDetail,
+});
+
+const quotesView = createQuotesView({
+  els: {
+    quotesBtn,
+    quotesModal,
+    quotesSignInPrompt,
+    quotesPanel,
+    closeQuotesBtn,
+    closeQuotes2Btn,
+    quotesTabBtn,
+    ordersTabBtn,
+    docStatusFilter,
+    newQuoteBtn,
+    docList,
+    quoteFormModal,
+    quoteForm,
+    quoteFormTitle,
+    closeQuoteFormBtn,
+    cancelQuoteFormBtn,
+    saveQuoteBtn,
+    quoteCustomerSelect,
+    quoteSiteSelect,
+    quoteItemsList,
+    quoteShadePicker,
+    addQuoteItemBtn,
+    quoteDiscount,
+    quoteTaxRate,
+    quoteNotes,
+    quoteTotals,
+    quoteFormError,
+    docDetailModal,
+    docDetailTitle,
+    docDetailBody,
+    docDetailActions,
+    closeDocDetailBtn,
+  },
+  apiRequest,
+  getApiToken,
+  fetchCustomers: customersView.fetchCustomers,
+  getCatalog: () => SHADE_CATALOG,
+  roomSqM: ROOM_SQ_M,
+  coverageSqMPerL: COVERAGE_SQ_M_PER_L,
+});
+
+const inventoryView = createInventoryView({
+  els: {
+    inventoryBtn,
+    inventoryModal,
+    inventorySignInPrompt,
+    inventoryPanel,
+    inventorySummary,
+    inventorySearchInput,
+    inventoryStatusFilter,
+    newInventoryBtn,
+    inventoryList,
+    closeInventoryBtn,
+    closeInventory2Btn,
+    inventoryFormModal,
+    inventoryForm,
+    inventoryFormTitle,
+    closeInventoryFormBtn,
+    cancelInventoryFormBtn,
+    saveInventoryBtn,
+    invShadePicker,
+    invQtyField,
+    inventoryFormError,
+    inventoryDetailModal,
+    inventoryDetailTitle,
+    inventoryDetailBody,
+    deleteInventoryBtn,
+    editInventoryBtn,
+    closeInventoryDetailBtn,
+    closeInventoryDetail2Btn,
+  },
+  apiRequest,
+  getApiToken,
+  getCatalog: () => SHADE_CATALOG,
+});
 
 /* ===================== Phase 3: Pilot Validation Analytics ===================== */
 
@@ -3619,6 +2582,18 @@ if (shadeSearchInput) {
   });
 }
 
+if (aiPaletteBtnEl) {
+  aiPaletteBtnEl.addEventListener("click", () => { fetchAiRecommendations(); });
+}
+if (aiPalettePromptEl) {
+  aiPalettePromptEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !aiPaletteBtnEl?.disabled) {
+      e.preventDefault();
+      fetchAiRecommendations();
+    }
+  });
+}
+
 if (closeContactBtn) closeContactBtn.addEventListener("click", closeContactModal);
 if (cancelContactBtn) cancelContactBtn.addEventListener("click", closeContactModal);
 if (contactForm) contactForm.addEventListener("submit", captureLeadFromForm);
@@ -3632,85 +2607,12 @@ if (deleteLeadBtn) deleteLeadBtn.addEventListener("click", deleteCurrentLead);
 if (exportLeadBtn) exportLeadBtn.addEventListener("click", exportCurrentLeadPackage);
 
 // Phase 5: CRM
-if (customersBtn) customersBtn.addEventListener("click", openCustomersModal);
-if (closeCustomersBtn) closeCustomersBtn.addEventListener("click", closeCustomersModal);
-if (closeCustomers2Btn) closeCustomers2Btn.addEventListener("click", closeCustomersModal);
-if (newCustomerBtn) newCustomerBtn.addEventListener("click", openNewCustomerModal);
-if (closeNewCustomerBtn) closeNewCustomerBtn.addEventListener("click", closeNewCustomerModal);
-if (cancelNewCustomerBtn) cancelNewCustomerBtn.addEventListener("click", closeNewCustomerModal);
-if (newCustomerForm) newCustomerForm.addEventListener("submit", handleNewCustomerSubmit);
-if (closeCustomerDetailBtn) closeCustomerDetailBtn.addEventListener("click", closeCustomerDetail);
-if (closeCustomerDetail2Btn) closeCustomerDetail2Btn.addEventListener("click", closeCustomerDetail);
-if (addSiteBtn) addSiteBtn.addEventListener("click", openSiteModal);
-if (editCustomerBtn) editCustomerBtn.addEventListener("click", editCurrentCustomer);
-if (deleteCustomerBtn) deleteCustomerBtn.addEventListener("click", deleteCurrentCustomer);
-if (siteForm) siteForm.addEventListener("submit", handleSiteSubmit);
-if (closeSiteBtn) closeSiteBtn.addEventListener("click", closeSiteModal);
-if (cancelSiteBtn) cancelSiteBtn.addEventListener("click", closeSiteModal);
-if (customerSearchInput) {
-  customerSearchInput.addEventListener("input", () => {
-    renderCustomersList(customerSearchInput.value.trim());
-  });
-}
-if (leadCustomerSelect) {
-  leadCustomerSelect.addEventListener("change", () => {
-    populateLeadSites(leadCustomerSelect.value);
-  });
-}
+customersView.wireListeners();
 
-// Phase 6: Quotes & Orders
-if (quotesBtn) quotesBtn.addEventListener("click", openQuotesModal);
-if (closeQuotesBtn) closeQuotesBtn.addEventListener("click", closeQuotesModal);
-if (closeQuotes2Btn) closeQuotes2Btn.addEventListener("click", closeQuotesModal);
-if (quotesTabBtn) quotesTabBtn.addEventListener("click", () => switchCommerceTab("quotes"));
-if (ordersTabBtn) ordersTabBtn.addEventListener("click", () => switchCommerceTab("orders"));
-if (docStatusFilter) docStatusFilter.addEventListener("change", renderDocList);
-if (newQuoteBtn) newQuoteBtn.addEventListener("click", () => openQuoteForm());
-if (quoteForm) quoteForm.addEventListener("submit", handleQuoteSubmit);
-if (closeQuoteFormBtn) closeQuoteFormBtn.addEventListener("click", closeQuoteForm);
-if (cancelQuoteFormBtn) cancelQuoteFormBtn.addEventListener("click", closeQuoteForm);
-if (addQuoteItemBtn) addQuoteItemBtn.addEventListener("click", () => { addQuoteItemRow(blankItem()); recomputeQuoteTotals(); });
-if (quoteShadePicker) quoteShadePicker.addEventListener("change", onShadePicked);
-if (quoteCustomerSelect) quoteCustomerSelect.addEventListener("change", () => populateQuoteSites(quoteCustomerSelect.value));
-if (quoteDiscount) quoteDiscount.addEventListener("input", recomputeQuoteTotals);
-if (quoteTaxRate) quoteTaxRate.addEventListener("input", recomputeQuoteTotals);
-if (closeDocDetailBtn) closeDocDetailBtn.addEventListener("click", closeDocDetail);
-
-// Phase 6: Inventory
-if (inventoryBtn) inventoryBtn.addEventListener("click", openInventoryModal);
-if (closeInventoryBtn) closeInventoryBtn.addEventListener("click", closeInventoryModal);
-if (closeInventory2Btn) closeInventory2Btn.addEventListener("click", closeInventoryModal);
-if (newInventoryBtn) newInventoryBtn.addEventListener("click", () => openInventoryForm());
-if (inventoryForm) inventoryForm.addEventListener("submit", handleInventorySubmit);
-if (closeInventoryFormBtn) closeInventoryFormBtn.addEventListener("click", closeInventoryForm);
-if (cancelInventoryFormBtn) cancelInventoryFormBtn.addEventListener("click", closeInventoryForm);
-if (closeInventoryDetailBtn) closeInventoryDetailBtn.addEventListener("click", closeInventoryDetail);
-if (closeInventoryDetail2Btn) closeInventoryDetail2Btn.addEventListener("click", closeInventoryDetail);
-if (editInventoryBtn) editInventoryBtn.addEventListener("click", editCurrentInventory);
-if (deleteInventoryBtn) deleteInventoryBtn.addEventListener("click", deleteCurrentInventory);
-if (inventorySearchInput) inventorySearchInput.addEventListener("input", renderInventoryList);
-if (inventoryStatusFilter) inventoryStatusFilter.addEventListener("change", renderInventoryList);
-if (invShadePicker) {
-  invShadePicker.addEventListener("change", () => {
-    const opt = invShadePicker.selectedOptions[0];
-    if (!opt || !opt.value) return;
-    const nameEl = document.getElementById("invName");
-    const brandEl = document.getElementById("invBrand");
-    const priceEl = document.getElementById("invUnitPrice");
-    if (nameEl && !nameEl.value) nameEl.value = opt.dataset.name || "";
-    if (brandEl && !brandEl.value) brandEl.value = opt.dataset.brand || "";
-    if (priceEl && (!priceEl.value || priceEl.value === "0")) priceEl.value = opt.dataset.price || "0";
-  });
-}
-
-// Phase 6: Credit Ledger
-if (ledgerBtn) ledgerBtn.addEventListener("click", openLedgerModal);
-if (closeLedgerBtn) closeLedgerBtn.addEventListener("click", closeLedgerModal);
-if (closeLedger2Btn) closeLedger2Btn.addEventListener("click", closeLedgerModal);
-if (closeLedgerDetailBtn) closeLedgerDetailBtn.addEventListener("click", closeLedgerDetail);
-if (closeLedgerDetail2Btn) closeLedgerDetail2Btn.addEventListener("click", closeLedgerDetail);
-if (ledgerSearchInput) ledgerSearchInput.addEventListener("input", renderLedgerList);
-if (ledgerFilter) ledgerFilter.addEventListener("change", renderLedgerList);
+// Phase 6: Quotes, Inventory, Ledger
+quotesView.wireListeners();
+inventoryView.wireListeners();
+ledgerView.wireListeners();
 
 // Phase 3: leads modal tab buttons
 const leadsTabBtn = document.getElementById("leadsTabBtn");
@@ -3774,9 +2676,9 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
     if (e.target === m) {
       m.classList.add("hidden");
       if (m === leadDetailModal) currentDetailLeadId = null;
-      if (m === docDetailModal) currentDoc = null;
-      if (m === inventoryDetailModal) { currentInventoryId = null; currentInventoryObj = null; }
-      if (m === ledgerDetailModal) currentLedgerCustomerId = null;
+      if (m === docDetailModal) quotesView.clearCurrentDoc();
+      if (m === inventoryDetailModal) inventoryView.clearCurrentInventory();
+      if (m === ledgerDetailModal) ledgerView.clearCurrentLedgerCustomer();
     }
   });
 });
@@ -3785,35 +2687,35 @@ if (clearAnalyticsBtnEl) clearAnalyticsBtnEl.addEventListener("click", clearAnal
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (ledgerDetailModal && !ledgerDetailModal.classList.contains("hidden")) {
-      closeLedgerDetail();
+      ledgerView.closeLedgerDetail();
       return;
     }
     if (ledgerModal && !ledgerModal.classList.contains("hidden")) {
-      closeLedgerModal();
+      ledgerView.closeLedgerModal();
       return;
     }
     if (inventoryDetailModal && !inventoryDetailModal.classList.contains("hidden")) {
-      closeInventoryDetail();
+      inventoryView.closeInventoryDetail();
       return;
     }
     if (inventoryFormModal && !inventoryFormModal.classList.contains("hidden")) {
-      closeInventoryForm();
+      inventoryView.closeInventoryForm();
       return;
     }
     if (inventoryModal && !inventoryModal.classList.contains("hidden")) {
-      closeInventoryModal();
+      inventoryView.closeInventoryModal();
       return;
     }
     if (docDetailModal && !docDetailModal.classList.contains("hidden")) {
-      closeDocDetail();
+      quotesView.closeDocDetail();
       return;
     }
     if (quoteFormModal && !quoteFormModal.classList.contains("hidden")) {
-      closeQuoteForm();
+      quotesView.closeQuoteForm();
       return;
     }
     if (quotesModal && !quotesModal.classList.contains("hidden")) {
-      closeQuotesModal();
+      quotesView.closeQuotesModal();
       return;
     }
     if (leadDetailModal && !leadDetailModal.classList.contains("hidden")) {
